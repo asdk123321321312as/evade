@@ -1,7 +1,7 @@
 --=========================================================================
---  SleepScript  v1.5   |   Evade   |   client-side
+--  SleepScript  v1.6   |   Evade   |   client-side
 --  Меню: Z
---  Осталось: FOV, небо/свет, внешка (правая нога, headless, аксессуары, невидимость), ноклип
+--  Осталось: FOV, небо/свет, Headless, Korblox (правая нога)
 --=========================================================================
 
 if getgenv and getgenv().SleepScript and getgenv().SleepScript.Unload then
@@ -21,17 +21,14 @@ if getgenv then getgenv().SleepScript = API end
 
 --== 1. Конфиг ==--
 local CFG = {
-	MenuKey       = "Z",
-	FOV           = 85,
-	FOVLock       = true,
-	Fullbright    = false,
-	Sky           = "По умолчанию",
-	KeepLook      = true,
-	Headless      = false,
-	NoRightLeg    = false,
-	NoAccessories = false,
-	Invisible     = false,
-	NoClip        = false,
+	MenuKey    = "Z",
+	FOV        = 85,
+	FOVLock    = true,
+	Fullbright = false,
+	Sky        = "По умолчанию",
+	KeepLook   = true,
+	Headless   = false,
+	NoRightLeg = false,
 }
 
 local COL = {
@@ -130,8 +127,8 @@ local guiNotify = makeGui("SleepScriptNotify", 1000)
 
 local main = new("Frame", {
 	Name = "Main",
-	Size = UDim2.new(0, 480, 0, 320),
-	Position = UDim2.new(0.5, -240, 0.5, -160),
+	Size = UDim2.new(0, 480, 0, 300),
+	Position = UDim2.new(0.5, -240, 0.5, -150),
 	BackgroundColor3 = COL.bg,
 	BorderSizePixel = 0,
 	ClipsDescendants = true,
@@ -152,7 +149,7 @@ new("TextLabel", {
 
 new("TextLabel", {
 	BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -62, 0.5, 0),
-	Size = UDim2.new(0, 120, 1, 0), Font = Enum.Font.GothamMedium, Text = "v1.5  •  Evade",
+	Size = UDim2.new(0, 120, 1, 0), Font = Enum.Font.GothamMedium, Text = "v1.6  •  Evade",
 	TextColor3 = COL.dim, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right,
 }, header)
 
@@ -173,7 +170,7 @@ headerBtn("✕", -10, function() gui.Enabled = false end)
 local minimized = false
 headerBtn("–", -36, function()
 	minimized = not minimized
-	main.Size = minimized and UDim2.new(0, 480, 0, 34) or UDim2.new(0, 480, 0, 320)
+	main.Size = minimized and UDim2.new(0, 480, 0, 34) or UDim2.new(0, 480, 0, 300)
 end)
 
 do
@@ -416,7 +413,7 @@ new("UIListLayout", {
 }, toastHolder)
 
 local function toast(text, color)
-	local f = new("Frame", { Size = UDim2.new(0, 280, 0, 24), BackgroundColor3 = COL.panel, BackgroundTransparency = 1 }, toastHolder)
+	local f = new("Frame", { Size = UDim2.new(0, 300, 0, 24), BackgroundColor3 = COL.panel, BackgroundTransparency = 1 }, toastHolder)
 	corner(6, f)
 	stroke(f, color or COL.accent, 1)
 	local l = new("TextLabel", {
@@ -572,38 +569,111 @@ local function setFullbright(on)
 	end
 end
 
---== 7. Персонаж ==--
-local function getChar() return LP.Character end
-local function getHum(c)
-	c = c or getChar()
-	return c and c:FindFirstChildOfClass("Humanoid")
+--== 7. Поиск персонажа (4 независимых способа) ==--
+local function humIn(model)
+	if not model then return nil end
+	return model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildWhichIsA("Humanoid", true)
 end
 
--- имена как запасной вариант, если GetLimb недоступен
-local LEG_NAMES = {
-	RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
-	["Right Leg"] = true, RightLeg = true,
-}
+local function searchByName(root, depth)
+	if depth > 3 or not root then return nil end
+	for _, d in ipairs(root:GetChildren()) do
+		if d:IsA("Model") and d.Name == LP.Name and humIn(d) then return d end
+		if d:IsA("Model") or d:IsA("Folder") then
+			local r = searchByName(d, depth + 1)
+			if r then return r end
+		end
+	end
+	return nil
+end
 
--- главный способ: определяем конечность через Humanoid:GetLimb (не зависит от имён и от R6/R15)
+local charSource = "?"
+
+local function getChar()
+	-- 1. стандартный путь
+	local c = LP.Character
+	if c and c.Parent and humIn(c) then
+		charSource = "Player.Character"
+		return c
+	end
+
+	-- 2. тело, которым управляет камера (самый надёжный путь в играх с нестандартным спавном)
+	local cam = workspace.CurrentCamera
+	local subj = cam and cam.CameraSubject
+	if subj and subj:IsA("Humanoid") and subj.Parent then
+		charSource = "CameraSubject"
+		return subj.Parent
+	end
+
+	-- 3. поиск модели с нашим ником (включая вложенные папки)
+	local byName = searchByName(workspace, 0)
+	if byName then
+		charSource = "поиск по нику"
+		return byName
+	end
+
+	-- 4. что было
+	if c and c.Parent then
+		charSource = "Player.Character (без Humanoid)"
+		return c
+	end
+	charSource = "не найден"
+	return nil
+end
+
+local function getHum(c)
+	c = c or getChar()
+	return humIn(c)
+end
+
+--== 8. Детект ноги и головы (4 уровня, без опоры на имена) ==--
 local function limbOf(hum, part)
 	local ok, limb = pcall(function() return hum:GetLimb(part) end)
 	if ok then return limb end
 	return nil
 end
 
+local function nameHas(name, ...)
+	local l = name:lower()
+	for _, w in ipairs({ ... }) do
+		if l:find(w, 1, true) then return true end
+	end
+	return false
+end
+
+local LEG_NAMES = {
+	RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
+	["Right Leg"] = true, RightLeg = true, RightLowerLeg = true,
+}
+
 local function isRightLeg(hum, part)
+	-- уровень 1: GetLimb
 	local limb = limbOf(hum, part)
 	if limb == Enum.Limb.RightLeg then return true end
 	if limb and limb ~= Enum.Limb.Unknown then return false end
-	return LEG_NAMES[part.Name] == true
+	-- уровень 2: точное имя
+	if LEG_NAMES[part.Name] then return true end
+	-- уровень 3: подстрока
+	if nameHas(part.Name, "right") and nameHas(part.Name, "leg", "foot", "knee", "ankle", "hip", "thigh") then
+		return true
+	end
+	-- уровень 4: сустав правого бедра
+	for _, j in ipairs(part:GetChildren()) do
+		if j:IsA("Motor6D") and nameHas(j.Name, "righthip", "rightknee", "rightankle") then return true end
+	end
+	return false
 end
 
 local function isHeadPart(hum, part)
 	local limb = limbOf(hum, part)
 	if limb == Enum.Limb.Head then return true end
 	if limb and limb ~= Enum.Limb.Unknown then return false end
-	return part.Name == "Head"
+	if part.Name == "Head" or part.Name:lower() == "head" then return true end
+	if nameHas(part.Name, "head") and not nameHas(part.Name, "headphone", "headband") then return true end
+	for _, d in ipairs(part:GetChildren()) do
+		if d:IsA("Decal") and nameHas(d.Name, "face") then return true end
+	end
+	return false
 end
 
 local function isWeldedTo(acc, part)
@@ -618,8 +688,13 @@ local function isWeldedTo(acc, part)
 end
 
 local cache = { char = nil, hum = nil, leg = {}, legAcc = {}, head = nil, face = nil }
+local lastBuild = 0
 
-local function rebuildCache()
+local function rebuildCache(force)
+	local now = os.clock()
+	if not force and now - lastBuild < 0.2 then return end
+	lastBuild = now
+
 	local c = getChar()
 	local hum = getHum(c)
 	if not c or not hum then
@@ -657,30 +732,11 @@ local function rebuildCache()
 	cache = { char = c, hum = hum, leg = leg, legAcc = legAcc, head = head, face = face }
 end
 
-local function legCount()
-	rebuildCache()
-	return #cache.leg, #cache.legAcc
-end
-
--- принудительное удержание каждый кадр
+--== 9. Применение ==--
 local function enforce()
 	if not CFG.KeepLook then return end
-	local c = getChar()
-	local hum = getHum(c)
-	if not c or not hum then return end
-
-	rebuildCache()
-
-	if CFG.Invisible then
-		for _, d in ipairs(c:GetDescendants()) do
-			if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Transparency ~= 1 then
-				d.Transparency = 1
-			end
-		end
-		if cache.head and cache.head.Transparency ~= 1 then cache.head.Transparency = 1 end
-		if cache.face and cache.face.Transparency ~= 1 then cache.face.Transparency = 1 end
-		return
-	end
+	rebuildCache(false)
+	if not cache.char then return end
 
 	if CFG.NoRightLeg then
 		for _, p in ipairs(cache.leg) do
@@ -696,23 +752,12 @@ local function enforce()
 		if cache.head and cache.head.Transparency ~= 1 then cache.head.Transparency = 1 end
 		if cache.face and cache.face.Transparency ~= 1 then cache.face.Transparency = 1 end
 	end
-
-	if CFG.NoAccessories then
-		for _, d in ipairs(c:GetChildren()) do
-			if d:IsA("Accessory") or d:IsA("Hat") then
-				local h = d:FindFirstChild("Handle")
-				if h and h.Transparency ~= 1 then h.Transparency = 1 end
-			end
-		end
-	end
 end
 
--- полное применение с восстановлением
 local function reapplyAll()
-	local c = getChar()
-	local hum = getHum(c)
-	if not c or not hum then return end
-	rebuildCache()
+	rebuildCache(true)
+	local c = cache.char
+	if not c then return end
 
 	local legSet = {}
 	for _, p in ipairs(cache.leg) do legSet[p] = true end
@@ -720,40 +765,24 @@ local function reapplyAll()
 	for _, h in ipairs(cache.legAcc) do legAccSet[h] = true end
 
 	for _, d in ipairs(c:GetDescendants()) do
-		if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
-			local hide = CFG.Invisible
+		if d:IsA("BasePart") then
 			if legSet[d] then
-				hide = hide or CFG.NoRightLeg
+				d.Transparency = CFG.NoRightLeg and 1 or 0
 				d.CanCollide = not CFG.NoRightLeg
 			end
-			d.Transparency = hide and 1 or 0
-		elseif d:IsA("Decal") and d.Parent and d.Parent.Name == "Head" then
-			d.Transparency = CFG.Headless and 1 or 0
 		elseif d:IsA("Accessory") or d:IsA("Hat") then
 			local h = d:FindFirstChild("Handle")
-			if h then
-				local hide = CFG.NoAccessories or legAccSet[h]
-				h.Transparency = hide and 1 or 0
+			if h and legAccSet[h] then
+				h.Transparency = CFG.NoRightLeg and 1 or 0
 			end
 		end
 	end
 
-	if cache.head then
-		cache.head.Transparency = (CFG.Headless or CFG.Invisible) and 1 or 0
-	end
+	if cache.face then cache.face.Transparency = CFG.Headless and 1 or 0 end
+	if cache.head then cache.head.Transparency = CFG.Headless and 1 or 0 end
 end
 
-local function applyNoClip(on)
-	local c = getChar()
-	if not c then return end
-	for _, d in ipairs(c:GetDescendants()) do
-		if d:IsA("BasePart") and d.CanCollide == on then
-			d.CanCollide = not on
-		end
-	end
-end
-
---== 8. UI: Визуал ==--
+--== 10. UI: Визуал ==--
 makeSection(scrollVisual, "КАМЕРА")
 makeSlider(scrollVisual, "FOV", 40, 130, CFG.FOV, 1, function(v) setFOV(v) end)
 makeToggle(scrollVisual, "Держать FOV (перехват)", CFG.FOVLock, function(v) CFG.FOVLock = v end)
@@ -790,53 +819,46 @@ makeButton(scrollVisual, "Применить свой скайбокс", functio
 		lf = boxLf.Text, rt = boxRt.Text, up = boxUp.Text })
 end)
 
---== 9. UI: Персонаж ==--
+--== 11. UI: Персонаж ==--
 makeSection(scrollChar, "ВНЕШКА (локально)")
 makeToggle(scrollChar, "Headless", CFG.Headless, function(v)
 	CFG.Headless = v
 	reapplyAll()
 	if v then
-		rebuildCache()
-		toast(cache.head and "Голова найдена и скрыта" or "Голова НЕ найдена", cache.head and COL.good or COL.bad)
+		if cache.head then
+			toast("Голова скрыта (" .. cache.head.Name .. ")", COL.good)
+		else
+			toast("Голова не найдена — смотри строку диагностики", COL.bad)
+		end
 	end
 end)
 makeToggle(scrollChar, "Убрать правую ногу (+ одежда на ней)", CFG.NoRightLeg, function(v)
 	CFG.NoRightLeg = v
 	reapplyAll()
 	if v then
-		local parts, accs = legCount()
-		if parts > 0 then
-			toast("Частей ноги: " .. parts .. ", одежды: " .. accs, COL.good)
+		if #cache.leg > 0 then
+			toast("Скрыто частей ноги: " .. #cache.leg .. ", одежды: " .. #cache.legAcc, COL.good)
 		else
-			toast("Правая нога НЕ найдена!", COL.bad)
+			toast("Правая нога не найдена — смотри диагностику", COL.bad)
 		end
 	end
 end)
-makeToggle(scrollChar, "Убрать все аксессуары", CFG.NoAccessories, function(v)
-	CFG.NoAccessories = v
-	reapplyAll()
-end)
-makeToggle(scrollChar, "Невидимость", CFG.Invisible, function(v)
-	CFG.Invisible = v
-	reapplyAll()
-end)
-makeToggle(scrollChar, "Ноклип", CFG.NoClip, function(v) CFG.NoClip = v end)
 
-local diag = makeLabel(scrollChar, "поиск частей...", COL.dim)
+local diag = makeLabel(scrollChar, "поиск...", COL.dim, 34)
 makeButton(scrollChar, "Переприменить внешку", function()
 	reapplyAll()
-	local parts, accs = legCount()
-	toast("Нога: " .. parts .. " частей, " .. accs .. " одежды", parts > 0 and COL.good or COL.bad)
+	toast("Нога: " .. #cache.leg .. " | голова: " .. (cache.head and "есть" or "нет"),
+		#cache.leg > 0 and COL.good or COL.bad)
 end)
 
---== 10. UI: Прочее ==--
+--== 12. UI: Прочее ==--
 makeSection(scrollMisc, "ОБХОД АНТИЧИТА")
 makeToggle(scrollMisc, "Держать внешку (анти-сброс)", CFG.KeepLook, function(v)
 	CFG.KeepLook = v
 	reapplyAll()
-	toast(v and "Анти-сброс внешки: ВКЛ" or "Анти-сброс внешки: ВЫКЛ")
+	toast(v and "Анти-сброс: ВКЛ" or "Анти-сброс: ВЫКЛ")
 end)
-makeLabel(scrollMisc, "Внешка проверяется и возвращается каждый кадр — игра не может её откатить.", COL.dim)
+makeLabel(scrollMisc, "Внешка проверяется каждый кадр и возвращается — игра её не откатит.", COL.dim)
 
 makeSection(scrollMisc, "УТИЛИТЫ")
 makeKeybind(scrollMisc, "Кнопка меню", CFG.MenuKey, function(k) CFG.MenuKey = k end)
@@ -860,7 +882,7 @@ end)
 
 makeLabel(scrollMisc, CFG.MenuKey .. " — открыть/закрыть меню", COL.dim)
 
---== 11. Ввод ==--
+--== 13. Ввод ==--
 conn(UIS.InputBegan, function(input)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local name = input.KeyCode.Name
@@ -888,26 +910,33 @@ conn(UIS.InputEnded, function(input)
 	end
 end)
 
---== 12. Цикл (каждый кадр, с защитой от ошибок) ==--
+--== 14. Цикл ==--
 local acc = { diag = 0, fov = 0 }
 
 conn(RunService.RenderStepped, function(dt)
-	pcall(function()
-		local c = getChar()
-		if CFG.NoClip then applyNoClip(true) end
-		enforce()
-	end)
+	pcall(enforce)
 
 	acc.diag += dt
 	if acc.diag >= 0.5 then
 		acc.diag = 0
 		pcall(function()
-			rebuildCache()
-			local names = {}
-			for _, p in ipairs(cache.leg) do names[#names + 1] = p.Name end
-			diag.Text = "нога: " .. (#names > 0 and table.concat(names, ", ") or "НЕ найдена")
-				.. "   |   голова: " .. (cache.head and "найдена" or "нет")
-				.. "   |   аксессуары на ноге: " .. tostring(#cache.legAcc)
+			rebuildCache(true)
+			local c, hum = cache.char, cache.hum
+			local parts = {}
+			if c then
+				for _, d in ipairs(c:GetDescendants()) do
+					if d:IsA("BasePart") then parts[#parts + 1] = d.Name end
+				end
+			end
+			local legNames = {}
+			for _, p in ipairs(cache.leg) do legNames[#legNames + 1] = p.Name end
+
+			diag.Text = string.format(
+				"источник: %s | персонаж: %s | Humanoid: %s | частей: %d\nнога: %s | голова: %s\nимена: %s",
+				charSource, tostring(c ~= nil), tostring(hum ~= nil), #parts,
+				#legNames > 0 and table.concat(legNames, ", ") or "НЕТ",
+				cache.head and cache.head.Name or "НЕТ",
+				table.concat(parts, ", ", 1, math.min(#parts, 12)))
 		end)
 	end
 
@@ -919,7 +948,7 @@ conn(RunService.RenderStepped, function(dt)
 	end
 end)
 
---== 13. Респавн ==--
+--== 15. Респавн ==--
 local function onCharacter(char)
 	cache = { char = nil, hum = nil, leg = {}, legAcc = {}, head = nil, face = nil }
 	local hum = char:WaitForChild("Humanoid", 5)
@@ -931,16 +960,16 @@ end
 conn(LP.CharacterAdded, onCharacter)
 if LP.Character then task.spawn(onCharacter, LP.Character) end
 
---== 14. Инициализация ==--
+--== 16. Инициализация ==--
 setFOV(CFG.FOV)
 if CFG.Fullbright then setFullbright(true) elseif CFG.Sky ~= "По умолчанию" then applySky(CFG.Sky) end
 task.spawn(function()
 	task.wait(1)
 	reapplyAll()
 end)
-toast("SleepScript v1.5 загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
+toast("SleepScript v1.6 загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
 
---== 15. Выгрузка ==--
+--== 17. Выгрузка ==--
 function API.Unload()
 	for _, c in ipairs(CONNS) do pcall(function() c:Disconnect() end) end
 	pcall(function() RunService:UnbindFromRenderStep("SleepScript_FOV") end)
@@ -948,14 +977,14 @@ function API.Unload()
 	resetLighting()
 	local cam = workspace.CurrentCamera
 	if cam then cam.FieldOfView = 70 end
-	local c = getChar()
+	local c = cache.char or LP.Character
 	if c then
 		for _, d in ipairs(c:GetDescendants()) do
 			if d:IsA("BasePart") then
 				d.Transparency = 0
 				d.CanCollide = true
 			end
-			if d:IsA("Decal") and d.Parent and d.Parent.Name == "Head" then d.Transparency = 0 end
+			if d:IsA("Decal") then d.Transparency = 0 end
 		end
 	end
 	pcall(function() gui:Destroy() end)
