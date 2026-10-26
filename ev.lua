@@ -1,6 +1,7 @@
 --=========================================================================
---  SleepScript  v1.2   |   Evade   |   client-side
---  Меню: Z   |   Анимация: G   |   Полёт: F
+--  SleepScript  v1.3   |   Evade   |   client-side
+--  Меню: Z   |   Полёт: F
+--  Без анимаций, без масштаба тела, без headless
 --=========================================================================
 
 if getgenv and getgenv().SleepScript and getgenv().SleepScript.Unload then
@@ -13,7 +14,6 @@ local UIS          = game:GetService("UserInputService")
 local Lighting     = game:GetService("Lighting")
 local TweenService = game:GetService("TweenService")
 local HttpService  = game:GetService("HttpService")
-local ContentProvider = game:GetService("ContentProvider")
 
 local LP  = Players.LocalPlayer
 local API = {}
@@ -21,31 +21,23 @@ if getgenv then getgenv().SleepScript = API end
 
 --== 1. Конфиг ==--
 local CFG = {
-	MenuKey        = "Z",
-	FOV            = 85,
-	FOVLock        = true,
-	Fullbright     = false,
-	Sky            = "По умолчанию",
-	Headless       = false,
-	Korblox        = false,
-	NoAccessories  = false,
-	Invisible      = false,
-	NoClip         = false,
-	KeepSpeed      = false,
-	Speed          = 16,
-	KeepJump       = false,
-	Jump           = 50,
-	Fly            = false,
-	FlySpeed       = 60,
-	FlyKey         = "F",
-	ACBypass       = true,
-	AnimId         = "",
-	AnimName       = "—",
-	AnimLoop       = true,
-	AnimSpeed      = 1,
-	AnimKey        = "G",
-	AnimPriority   = "Action4",
-	LocalAnimator  = false,
+	MenuKey       = "Z",
+	FOV           = 85,
+	FOVLock       = true,
+	Fullbright    = false,
+	Sky           = "По умолчанию",
+	NoRightLeg    = false,
+	NoAccessories = false,
+	Invisible     = false,
+	NoClip        = false,
+	KeepSpeed     = false,
+	Speed         = 16,
+	KeepJump      = false,
+	Jump          = 50,
+	Fly           = false,
+	FlySpeed      = 60,
+	FlyKey        = "F",
+	ACBypass      = true,
 }
 
 local COL = {
@@ -62,7 +54,6 @@ local COL = {
 }
 
 local CONFIG_FILE = "SleepScript_Evade.json"
-local ANIM_CACHE  = "SleepScript_EvadeAnim.json"
 
 local function saveCFG()
 	if not writefile then return end
@@ -169,7 +160,7 @@ new("TextLabel", {
 
 new("TextLabel", {
 	BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -62, 0.5, 0),
-	Size = UDim2.new(0, 120, 1, 0), Font = Enum.Font.GothamMedium, Text = "v1.2  •  Evade",
+	Size = UDim2.new(0, 120, 1, 0), Font = Enum.Font.GothamMedium, Text = "v1.3  •  Evade",
 	TextColor3 = COL.dim, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right,
 }, header)
 
@@ -214,7 +205,7 @@ do
 	end)
 end
 
-local TABS = { "Визуал", "Персонаж", "Анимации", "Прочее" }
+local TABS = { "Визуал", "Персонаж", "Прочее" }
 local tabBar = new("Frame", {
 	Position = UDim2.new(0, 8, 0, 38), Size = UDim2.new(1, -16, 0, 24), BackgroundTransparency = 1,
 }, main)
@@ -223,7 +214,7 @@ new("UIListLayout", {
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, tabBar)
 
-local pages, tabBtns = {}, {}
+local pages, tabBtns, SCROLLS = {}, {}, {}
 
 local function makePage()
 	local page = new("Frame", {
@@ -241,13 +232,12 @@ local function makePage()
 	return page, scroll
 end
 
-local SCROLLS = {}
 for i, name in ipairs(TABS) do
 	local page, scroll = makePage()
 	pages[i] = page
 	SCROLLS[i] = scroll
 	local btn = new("TextButton", {
-		Size = UDim2.new(0, 96, 1, 0), BackgroundColor3 = COL.panel,
+		Size = UDim2.new(0, 110, 1, 0), BackgroundColor3 = COL.panel,
 		Font = Enum.Font.GothamMedium, Text = name, TextColor3 = COL.dim,
 		TextSize = 12, AutoButtonColor = false,
 	}, tabBar)
@@ -268,8 +258,7 @@ for i, name in ipairs(TABS) do
 	end
 end
 
-local scrollVisual, scrollChar, scrollAnim, scrollMisc =
-	SCROLLS[1], SCROLLS[2], SCROLLS[3], SCROLLS[4]
+local scrollVisual, scrollChar, scrollMisc = SCROLLS[1], SCROLLS[2], SCROLLS[3]
 
 local activeSlider = nil
 
@@ -590,48 +579,58 @@ local function setFullbright(on)
 end
 
 --== 7. Персонаж ==--
-local KORBLOX_ID = 139607718
-local origRightLeg = nil
-
 local function getChar() return LP.Character end
 local function getHum(c)
 	c = c or getChar()
 	return c and c:FindFirstChildOfClass("Humanoid")
 end
 
-local function applyHeadless(on)
-	local head = getChar() and getChar():FindFirstChild("Head")
-	if not head then return end
-	head.Transparency = on and 1 or 0
-	local face = head:FindFirstChildOfClass("Decal")
-	if face then face.Transparency = on and 1 or 0 end
+-- правая нога: R15 (бедро, голень, ступня) и R6 (одна часть)
+local LEG_PARTS = { "RightUpperLeg", "RightLowerLeg", "RightFoot", "Right Leg" }
+
+local function collectLegParts(c)
+	local t = {}
+	for _, n in ipairs(LEG_PARTS) do
+		local p = c:FindFirstChild(n)
+		if p and p:IsA("BasePart") then t[#t + 1] = p end
+	end
+	return t
 end
 
-local function applyKorblox(on)
-	local c = getChar()
-	local hum = getHum(c)
-	if not hum or not c then return end
-	if on then
-		if not origRightLeg then
-			pcall(function() origRightLeg = hum:GetAppliedDescription().RightLeg end)
+local function isWeldedTo(acc, part)
+	local handle = acc:FindFirstChild("Handle")
+	if not handle then return false end
+	for _, j in ipairs(handle:GetChildren()) do
+		if j:IsA("Weld") or j:IsA("WeldConstraint") or j:IsA("Motor6D") or j:IsA("Snap") then
+			if j.Part0 == part or j.Part1 == part then return true end
 		end
-		local ok = pcall(function()
-			local d = hum:GetAppliedDescription()
-			d.RightLeg = KORBLOX_ID
-			hum:ApplyDescription(d)
-		end)
-		if not ok then
-			for _, n in ipairs({ "RightUpperLeg", "RightLowerLeg", "Right Leg" }) do
-				local p = c:FindFirstChild(n)
-				if p then p.Transparency = 1 end
+	end
+	return false
+end
+
+local function applyNoRightLeg(on)
+	local c = getChar()
+	if not c then return end
+	local parts = collectLegParts(c)
+	if #parts == 0 then return end
+
+	for _, p in ipairs(parts) do
+		p.Transparency = on and 1 or 0
+		p.CanCollide = not on
+	end
+
+	-- одежда (аксессуары), привязанная к правой ноге — иначе висит в воздухе
+	for _, acc in ipairs(c:GetChildren()) do
+		if acc:IsA("Accessory") or acc:IsA("Hat") then
+			local hit = false
+			for _, p in ipairs(parts) do
+				if isWeldedTo(acc, p) then hit = true break end
+			end
+			if hit then
+				local handle = acc:FindFirstChild("Handle")
+				if handle then handle.Transparency = on and 1 or 0 end
 			end
 		end
-	else
-		pcall(function()
-			local d = hum:GetAppliedDescription()
-			d.RightLeg = origRightLeg or 0
-			hum:ApplyDescription(d)
-		end)
 	end
 end
 
@@ -656,102 +655,17 @@ local function applyInvisible(on)
 	end
 end
 
---== 8. Анимации ==--
-local PRIORITY = {
-	Core = Enum.AnimationPriority.Core, Idle = Enum.AnimationPriority.Idle,
-	Movement = Enum.AnimationPriority.Movement, Action = Enum.AnimationPriority.Action,
-	Action2 = Enum.AnimationPriority.Action2, Action3 = Enum.AnimationPriority.Action3,
-	Action4 = Enum.AnimationPriority.Action4,
-}
-
-local currentTrack = nil
-local animStatus = nil
-
-local function getDefaultAnimator()
-	local hum = getHum()
-	if not hum then return nil end
-	return hum:FindFirstChildOfClass("Animator")
-end
-
-local function getLocalAnimator()
-	local hum = getHum()
-	if not hum then return nil end
-	local a = hum:FindFirstChild("SleepAnimator")
-	if not a then
-		a = Instance.new("Animator")
-		a.Name = "SleepAnimator"
-		a.Parent = hum
-	end
-	return a
-end
-
-local function removeLocalAnimator()
-	local hum = getHum()
-	if not hum then return end
-	local a = hum:FindFirstChild("SleepAnimator")
-	if a then a:Destroy() end
-end
-
-local function stopAnim()
-	if currentTrack then
-		pcall(function() currentTrack:Stop(0.15) end)
-		currentTrack = nil
-	end
-	if animStatus then animStatus.Text = "Статус: стоп" end
-end
-
-local function playAnim(id)
-	if not id or id == "" then
-		toast("Введи ID анимации", COL.bad)
-		return
-	end
-	local hum = getHum()
-	if not hum then
-		toast("Нет персонажа", COL.bad)
-		return
-	end
-	stopAnim()
-
-	local animator
-	if CFG.LocalAnimator then
-		animator = getLocalAnimator()
-	else
-		animator = hum:FindFirstChildOfClass("Animator") or getLocalAnimator()
-	end
-	if not animator then
-		toast("Animator не найден", COL.bad)
-		return
-	end
-
-	local full = id:match("^%d+$") and ("rbxassetid://" .. id) or id
-	local anim = Instance.new("Animation")
-	anim.AnimationId = full
-	pcall(function() ContentProvider:PreloadAsync({ anim }) end)
-
-	local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
-	if not ok or not track then
-		toast("Не удалось: " .. id, COL.bad)
-		return
-	end
-
-	track.Priority = PRIORITY[CFG.AnimPriority] or Enum.AnimationPriority.Action4
-	track.Looped = CFG.AnimLoop
-	track:Play(0.1)
-	track:AdjustSpeed(CFG.AnimSpeed)
-	currentTrack = track
-	if animStatus then animStatus.Text = "Статус: играет" end
-	toast("Анимация: " .. tostring(CFG.AnimName))
-end
-
-local function toggleAnim()
-	if currentTrack and currentTrack.IsPlaying then
-		stopAnim()
-	else
-		playAnim(CFG.AnimId)
+local function applyNoClip(on)
+	local c = getChar()
+	if not c then return end
+	for _, d in ipairs(c:GetDescendants()) do
+		if d:IsA("BasePart") and d.CanCollide == on then
+			d.CanCollide = not on
+		end
 	end
 end
 
---== 9. Полёт / ноклип ==--
+--== 8. Полёт ==--
 local flyBV, flyBG, flyActive = nil, nil, false
 
 local function setFly(on)
@@ -799,22 +713,9 @@ local function flyStep()
 	if flyBG then flyBG.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.CFrame.LookVector) end
 end
 
-local function applyNoClip(on)
-	local c = getChar()
-	if not c then return end
-	for _, d in ipairs(c:GetDescendants()) do
-		if d:IsA("BasePart") and d.CanCollide == on then
-			d.Collide = not on
-			d.CanCollide = not on
-		end
-	end
-end
-
---== 10. UI: Визуал ==--
+--== 9. UI: Визуал ==--
 makeSection(scrollVisual, "КАМЕРА")
-makeSlider(scrollVisual, "FOV", 40, 130, CFG.FOV, 1, function(v)
-	setFOV(v)
-end)
+makeSlider(scrollVisual, "FOV", 40, 130, CFG.FOV, 1, function(v) setFOV(v) end)
 makeToggle(scrollVisual, "Держать FOV (перехват)", CFG.FOVLock, function(v) CFG.FOVLock = v end)
 local fovLive = makeLabel(scrollVisual, "текущий FOV: " .. tostring(math.floor(CFG.FOV)), COL.good)
 
@@ -849,17 +750,14 @@ makeButton(scrollVisual, "Применить свой скайбокс", functio
 		lf = boxLf.Text, rt = boxRt.Text, up = boxUp.Text })
 end)
 
---== 11. UI: Персонаж ==--
+--== 10. UI: Персонаж ==--
 makeSection(scrollChar, "ВНЕШКА (локально)")
-makeToggle(scrollChar, "Headless", CFG.Headless, function(v)
-	CFG.Headless = v
-	applyHeadless(v)
+makeToggle(scrollChar, "Убрать правую ногу", CFG.NoRightLeg, function(v)
+	CFG.NoRightLeg = v
+	applyNoRightLeg(v)
 end)
-makeToggle(scrollChar, "Korblox (правая нога)", CFG.Korblox, function(v)
-	CFG.Korblox = v
-	applyKorblox(v)
-end)
-makeToggle(scrollChar, "Убрать аксессуары", CFG.NoAccessories, function(v)
+makeLabel(scrollChar, "Скрывает бедро, голень и ступень правой ноги + одежду, привязанную к ней.", COL.dim)
+makeToggle(scrollChar, "Убрать все аксессуары", CFG.NoAccessories, function(v)
 	CFG.NoAccessories = v
 	applyAccessories(v)
 end)
@@ -873,210 +771,14 @@ makeToggle(scrollChar, "Невидимость", CFG.Invisible, function(v)
 			for _, d in ipairs(c:GetDescendants()) do
 				if d:IsA("BasePart") then d.Transparency = 0 end
 			end
-			applyHeadless(CFG.Headless)
 			applyAccessories(CFG.NoAccessories)
+			applyNoRightLeg(CFG.NoRightLeg)
 		end
 	end
 end)
 makeToggle(scrollChar, "Ноклип", CFG.NoClip, function(v) CFG.NoClip = v end)
 
-makeSection(scrollChar, "МАСШТАБ ТЕЛА")
-local function scaleSet(prop, v)
-	local hum = getHum()
-	if hum then pcall(function() hum[prop] = v end) end
-end
-makeSlider(scrollChar, "Рост", 0.6, 1.4, 1, 0.05, function(v) scaleSet("BodyHeightScale", v) end)
-makeSlider(scrollChar, "Ширина", 0.6, 1.4, 1, 0.05, function(v) scaleSet("BodyWidthScale", v) end)
-makeSlider(scrollChar, "Глубина", 0.6, 1.4, 1, 0.05, function(v) scaleSet("BodyDepthScale", v) end)
-makeSlider(scrollChar, "Голова", 0.6, 1.4, 1, 0.05, function(v) scaleSet("HeadScale", v) end)
-
---== 12. UI: Анимации ==--
-makeSection(scrollAnim, "СВОЯ АНИМАЦИЯ (по ID)")
-local animLabel = makeLabel(scrollAnim, "Сейчас: " .. tostring(CFG.AnimName), COL.text)
-local animIdBox = makeTextBox(scrollAnim, "ID анимации (только цифры)", CFG.AnimId, function(txt)
-	txt = txt:gsub("[^%d]", "")
-	CFG.AnimId = txt
-	CFG.AnimName = "ID " .. txt
-	animLabel.Text = "Сейчас: " .. CFG.AnimName
-end)
-animStatus = makeLabel(scrollAnim, "Статус: стоп", COL.dim)
-
-makeButton(scrollAnim, "▶  Играть (по кнопке " .. CFG.AnimKey .. " тоже)", function() playAnim(CFG.AnimId) end)
-makeButton(scrollAnim, "■  Стоп", function() stopAnim() end)
-makeKeybind(scrollAnim, "Кнопка вкл/выкл анимации", CFG.AnimKey, function(k) CFG.AnimKey = k end)
-makeToggle(scrollAnim, "Зациклить", CFG.AnimLoop, function(v)
-	CFG.AnimLoop = v
-	if currentTrack then currentTrack.Looped = v end
-end)
-makeSlider(scrollAnim, "Скорость", 0.1, 4, CFG.AnimSpeed, 0.05, function(v)
-	CFG.AnimSpeed = v
-	if currentTrack then pcall(function() currentTrack:AdjustSpeed(v) end) end
-end)
-
-makeSection(scrollAnim, "РЕЖИМ")
-local prioLabel = makeLabel(scrollAnim, "Приоритет: " .. tostring(CFG.AnimPriority), COL.text)
-local PRIO_LIST = { "Core", "Idle", "Movement", "Action", "Action2", "Action3", "Action4" }
-local prioIndex = 7
-for i, n in ipairs(PRIO_LIST) do
-	if n == CFG.AnimPriority then prioIndex = i end
-end
-makeButton(scrollAnim, "Сменить приоритет →", function()
-	prioIndex = prioIndex % #PRIO_LIST + 1
-	CFG.AnimPriority = PRIO_LIST[prioIndex]
-	prioLabel.Text = "Приоритет: " .. CFG.AnimPriority
-	if currentTrack then currentTrack.Priority = PRIORITY[CFG.AnimPriority] end
-end)
-makeToggle(scrollAnim, "Полностью клиентская (свой Animator)", CFG.LocalAnimator, function(v)
-	CFG.LocalAnimator = v
-	if v then
-		getLocalAnimator()
-		toast("Режим: сервер не видит анимацию")
-	else
-		stopAnim()
-		removeLocalAnimator()
-		toast("Режим: обычный Animator")
-	end
-end)
-makeLabel(scrollAnim, "Выкл — работает всегда и перебивает ходьбу (но трек уходит на сервер). Вкл — 100% локально, сервер и другие игроки не видят.", COL.dim)
-
-makeSection(scrollAnim, "СПИСОК АНИМАЦИЙ ИГРЫ")
-makeLabel(scrollAnim, "Собирает анимации, лежащие внутри Evade (в т.ч. старые/ивентовые с 2022). Кэшируется в файл.", COL.dim)
-local searchBox = makeTextBox(scrollAnim, "фильтр по названию...", "")
-local animList = new("ScrollingFrame", {
-	Size = UDim2.new(1, 0, 0, 140), BackgroundColor3 = COL.panel, BorderSizePixel = 0,
-	CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollBarThickness = 3, ScrollBarImageColor3 = COL.line,
-}, scrollAnim)
-corner(6, animList)
-stroke(animList, COL.line, 1)
-new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, animList)
-new("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingLeft = UDim.new(0, 6),
-	PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 5) }, animList)
-
-local scanned = {}
-
-local function renderList()
-	for _, c in ipairs(animList:GetChildren()) do
-		if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
-	end
-	local filter = searchBox.Text:lower()
-	local shown = 0
-	for _, item in ipairs(scanned) do
-		if shown >= 120 then break end
-		if filter == "" or item.name:lower():find(filter, 1, true) then
-			shown += 1
-			local idShort = item.id:gsub("rbxassetid://", "")
-			local b = new("TextButton", {
-				Size = UDim2.new(1, 0, 0, 20), BackgroundColor3 = COL.panel2, Font = Enum.Font.Gotham,
-				Text = item.name .. "  [" .. idShort .. "]", TextColor3 = COL.text,
-				TextSize = 10, AutoButtonColor = false,
-				TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-			}, animList)
-			corner(4, b)
-			conn(b.MouseButton1Click, function()
-				CFG.AnimId = idShort
-				CFG.AnimName = item.name
-				animLabel.Text = "Сейчас: " .. CFG.AnimName
-				animIdBox.Text = CFG.AnimId
-				playAnim(CFG.AnimId)
-			end)
-		end
-	end
-	if shown == 0 then
-		new("TextLabel", {
-			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.Gotham,
-			Text = "Пусто — нажми «Собрать анимации»", TextColor3 = COL.dim, TextSize = 10,
-		}, animList)
-	end
-end
-conn(searchBox:GetPropertyChangedSignal("Text"), renderList)
-
-local function saveCache()
-	if not writefile then return end
-	pcall(function() writefile(ANIM_CACHE, HttpService:JSONEncode(scanned)) end)
-end
-
-local function loadCache()
-	if not readfile or not isfile then return end
-	pcall(function()
-		if isfile(ANIM_CACHE) then
-			local data = HttpService:JSONDecode(readfile(ANIM_CACHE))
-			if type(data) == "table" and #data > 0 then
-				scanned = data
-				renderList()
-			end
-		end
-	end)
-end
-
-makeButton(scrollAnim, "Собрать анимации (быстро)", function()
-	task.spawn(function()
-		local roots = {}
-		local rs = game:GetService("ReplicatedStorage")
-		table.insert(roots, rs)
-		for _, n in ipairs({ "Animations", "Emotes", "Anim", "Shared", "Assets", "Modules" }) do
-			local f = rs:FindFirstChild(n)
-			if f then table.insert(roots, f) end
-		end
-		table.insert(roots, workspace)
-
-		local seen, out = {}, {}
-		for _, root in ipairs(roots) do
-			for _, obj in ipairs(root:GetDescendants()) do
-				if obj:IsA("Animation") then
-					local id = obj.AnimationId
-					if id and id ~= "" and not seen[id] then
-						seen[id] = true
-						table.insert(out, { name = obj:GetFullName(), id = id })
-					end
-				end
-			end
-		end
-		table.sort(out, function(a, b) return a.name < b.name end)
-		scanned = out
-		renderList()
-		saveCache()
-		toast("Найдено анимаций: " .. #out, #out > 0 and COL.good or COL.bad)
-	end)
-end)
-loadCache()
-
-makeSection(scrollAnim, "ГОТОВЫЕ (R15 — актуальный риг Evade)")
-local R15 = {
-	{ "Idle 1", "507766666" }, { "Idle 2", "782845736" }, { "Walk", "507777826" },
-	{ "Run", "507767714" }, { "Jump", "507765000" }, { "Fall", "507767968" },
-	{ "Swim", "507784897" }, { "Climb", "507765644" }, { "Wave", "507770239" },
-	{ "Point", "507770453" }, { "Dance 1", "507771019" }, { "Dance 2", "507771955" },
-	{ "Dance 3", "507772104" }, { "Dance 2A", "507776043" }, { "Dance 3A", "507777268" },
-	{ "Laugh", "507770818" }, { "Cheer", "507770677" }, { "Sit", "507768133" },
-}
-for _, a in ipairs(R15) do
-	makeButton(scrollAnim, a[1] .. "  •  " .. a[2], function()
-		CFG.AnimId, CFG.AnimName = a[2], "R15 " .. a[1]
-		animLabel.Text = "Сейчас: " .. CFG.AnimName
-		animIdBox.Text = a[2]
-		playAnim(a[2])
-	end, 22)
-end
-
-makeSection(scrollAnim, "ГОТОВЫЕ (R6 — классика)")
-local R6 = {
-	{ "Idle 1", "180435571" }, { "Idle 2", "180435792" }, { "Walk", "180426354" },
-	{ "Jump", "125750702" }, { "Fall", "180436148" }, { "Climb", "180436334" },
-	{ "Wave", "128777973" }, { "Point", "128853357" }, { "Dance 1", "182435998" },
-	{ "Dance 2", "182436842" }, { "Dance 3", "182436976" }, { "Laugh", "129423131" },
-	{ "Cheer", "129423030" },
-}
-for _, a in ipairs(R6) do
-	makeButton(scrollAnim, a[1] .. "  •  " .. a[2], function()
-		CFG.AnimId, CFG.AnimName = a[2], "R6 " .. a[1]
-		animLabel.Text = "Сейчас: " .. CFG.AnimName
-		animIdBox.Text = a[2]
-		playAnim(a[2])
-	end, 22)
-end
-
---== 13. UI: Прочее ==--
+--== 11. UI: Прочее ==--
 makeSection(scrollMisc, "ОБХОД АНТИЧИТА")
 local acToggles = {}
 makeToggle(scrollMisc, "Обход античита (все петли)", CFG.ACBypass, function(v)
@@ -1116,8 +818,7 @@ makeSlider(scrollMisc, "Скорость полёта", 10, 250, CFG.FlySpeed, 1
 makeSection(scrollMisc, "УТИЛИТЫ")
 makeKeybind(scrollMisc, "Кнопка меню", CFG.MenuKey, function(k) CFG.MenuKey = k end)
 makeButton(scrollMisc, "Переприменить всё", function()
-	applyHeadless(CFG.Headless)
-	applyKorblox(CFG.Korblox)
+	applyNoRightLeg(CFG.NoRightLeg)
 	applyAccessories(CFG.NoAccessories)
 	if CFG.Invisible then applyInvisible(true) end
 	setFOV(CFG.FOV)
@@ -1136,9 +837,9 @@ makeButton(scrollMisc, "Выгрузить SleepScript", function()
 	if API.Unload then API.Unload() end
 end)
 
-makeLabel(scrollMisc, CFG.MenuKey .. " — меню  •  " .. CFG.AnimKey .. " — анимация  •  " .. CFG.FlyKey .. " — полёт", COL.dim)
+makeLabel(scrollMisc, CFG.MenuKey .. " — меню  •  " .. CFG.FlyKey .. " — полёт", COL.dim)
 
---== 14. Ввод ==--
+--== 12. Ввод ==--
 conn(UIS.InputBegan, function(input)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local name = input.KeyCode.Name
@@ -1150,8 +851,6 @@ conn(UIS.InputBegan, function(input)
 	if UIS:GetFocusedTextBox() then return end
 	if name == CFG.MenuKey then
 		gui.Enabled = not gui.Enabled
-	elseif name == CFG.AnimKey then
-		toggleAnim()
 	elseif name == CFG.FlyKey then
 		CFG.Fly = not CFG.Fly
 		setFly(CFG.Fly)
@@ -1171,8 +870,8 @@ conn(UIS.InputEnded, function(input)
 	end
 end)
 
---== 15. Главный цикл ==--
-local acc = { korblox = 0, appearance = 0, suppress = 0, fov = 0 }
+--== 13. Главный цикл ==--
+local acc = { appearance = 0, fov = 0 }
 
 conn(RunService.RenderStepped, function(dt)
 	local c = getChar()
@@ -1189,26 +888,15 @@ conn(RunService.RenderStepped, function(dt)
 	if CFG.NoClip then applyNoClip(true) end
 	if CFG.Fly then flyStep() end
 
-	-- в локальном режиме глушим дефолтные треки, чтобы не было смешивания
-	if CFG.LocalAnimator and currentTrack and currentTrack.IsPlaying then
-		acc.suppress += dt
-		if acc.suppress >= 0.08 then
-			acc.suppress = 0
-			local da = getDefaultAnimator()
-			if da then
-				for _, t in ipairs(da:GetPlayingAnimationTracks()) do
-					pcall(function() t:Stop(0.08) end)
-				end
-			end
-		end
-	end
-
 	acc.appearance += dt
-	if acc.appearance >= 0.35 then
+	if acc.appearance >= 0.3 then
 		acc.appearance = 0
 		if c then
-			local head = c:FindFirstChild("Head")
-			if CFG.Headless and head and head.Transparency ~= 1 then applyHeadless(true) end
+			if CFG.NoRightLeg then
+				for _, p in ipairs(collectLegParts(c)) do
+					if p.Transparency ~= 1 then applyNoRightLeg(true); break end
+				end
+			end
 			if CFG.NoAccessories then applyAccessories(true) end
 			if CFG.Invisible then
 				for _, d in ipairs(c:GetDescendants()) do
@@ -1221,14 +909,6 @@ conn(RunService.RenderStepped, function(dt)
 		if CFG.Fullbright then setFullbright(true) end
 	end
 
-	acc.korblox += dt
-	if acc.korblox >= 1.2 and CFG.Korblox and hum then
-		acc.korblox = 0
-		pcall(function()
-			if hum:GetAppliedDescription().RightLeg ~= KORBLOX_ID then applyKorblox(true) end
-		end)
-	end
-
 	acc.fov += dt
 	if acc.fov >= 0.25 and fovLive then
 		acc.fov = 0
@@ -1237,10 +917,8 @@ conn(RunService.RenderStepped, function(dt)
 	end
 end)
 
---== 16. Респавн ==--
+--== 14. Респавн ==--
 local function onCharacter(char)
-	currentTrack = nil
-	origRightLeg = nil
 	local hum = char:WaitForChild("Humanoid", 5)
 	if not hum then return end
 	task.wait(0.4)
@@ -1249,29 +927,24 @@ local function onCharacter(char)
 		hum.UseJumpPower = true
 		hum.JumpPower = CFG.Jump
 	end
-	if CFG.Headless then applyHeadless(true) end
+	if CFG.NoRightLeg then applyNoRightLeg(true) end
 	if CFG.NoAccessories then applyAccessories(true) end
 	if CFG.Invisible then applyInvisible(true) end
-	if CFG.Korblox then task.wait(0.5); applyKorblox(true) end
-	if CFG.AnimId ~= "" then task.wait(0.5); playAnim(CFG.AnimId) end
 end
 
 conn(LP.CharacterAdded, onCharacter)
 if LP.Character then task.spawn(onCharacter, LP.Character) end
 
---== 17. Инициализация ==--
+--== 15. Инициализация ==--
 setFOV(CFG.FOV)
 if CFG.Fullbright then setFullbright(true) elseif CFG.Sky ~= "По умолчанию" then applySky(CFG.Sky) end
-if CFG.LocalAnimator then getLocalAnimator() end
-toast("SleepScript v1.2 загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
+toast("SleepScript v1.3 загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
 
---== 18. Выгрузка ==--
+--== 16. Выгрузка ==--
 function API.Unload()
 	for _, c in ipairs(CONNS) do pcall(function() c:Disconnect() end) end
 	pcall(function() RunService:UnbindFromRenderStep("SleepScript_FOV") end)
 	if fovConn then pcall(function() fovConn:Disconnect() end) end
-	stopAnim()
-	removeLocalAnimator()
 	if flyBV then flyBV:Destroy() end
 	if flyBG then flyBG:Destroy() end
 	resetLighting()
