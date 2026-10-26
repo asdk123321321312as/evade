@@ -1,10 +1,8 @@
 --=========================================================================
---  SleepScript  v1.1   |   Evade   |   client-side (сервер не видит)
+--  SleepScript  v1.2   |   Evade   |   client-side
 --  Меню: Z   |   Анимация: G   |   Полёт: F
---  Работает на любом экзекьюторе (Krnl / Solara / Wave / Delta / Real и т.д.)
 --=========================================================================
 
---== 0. Выгрузка прошлой версии ==--
 if getgenv and getgenv().SleepScript and getgenv().SleepScript.Unload then
 	pcall(getgenv().SleepScript.Unload)
 end
@@ -15,6 +13,7 @@ local UIS          = game:GetService("UserInputService")
 local Lighting     = game:GetService("Lighting")
 local TweenService = game:GetService("TweenService")
 local HttpService  = game:GetService("HttpService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local LP  = Players.LocalPlayer
 local API = {}
@@ -23,7 +22,7 @@ if getgenv then getgenv().SleepScript = API end
 --== 1. Конфиг ==--
 local CFG = {
 	MenuKey        = "Z",
-	FOV            = 80,
+	FOV            = 85,
 	FOVLock        = true,
 	Fullbright     = false,
 	Sky            = "По умолчанию",
@@ -46,7 +45,7 @@ local CFG = {
 	AnimSpeed      = 1,
 	AnimKey        = "G",
 	AnimPriority   = "Action4",
-	AnimStopOnMove = false,
+	LocalAnimator  = false,
 }
 
 local COL = {
@@ -63,12 +62,12 @@ local COL = {
 }
 
 local CONFIG_FILE = "SleepScript_Evade.json"
+local ANIM_CACHE  = "SleepScript_EvadeAnim.json"
 
 local function saveCFG()
 	if not writefile then return end
 	pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(CFG)) end)
 end
-
 local function loadCFG()
 	if not readfile or not isfile then return end
 	pcall(function()
@@ -131,16 +130,10 @@ local function makeGui(name, order)
 	g.DisplayOrder = order or 999
 	local placed = false
 	if gethui then
-		pcall(function()
-			g.Parent = gethui()
-			placed = true
-		end)
+		pcall(function() g.Parent = gethui(); placed = true end)
 	end
 	if not placed then
-		pcall(function()
-			g.Parent = game:GetService("CoreGui")
-			placed = true
-		end)
+		pcall(function() g.Parent = game:GetService("CoreGui"); placed = true end)
 	end
 	if not placed then g.Parent = LP:WaitForChild("PlayerGui") end
 	return g
@@ -169,39 +162,23 @@ local header = new("Frame", {
 corner(10, header)
 
 new("TextLabel", {
-	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 12, 0, 0),
-	Size = UDim2.new(0, 220, 1, 0),
-	Font = Enum.Font.GothamBold,
-	Text = "SleepScript",
-	TextColor3 = COL.text,
-	TextSize = 14,
-	TextXAlignment = Enum.TextXAlignment.Left,
+	BackgroundTransparency = 1, Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(0, 220, 1, 0),
+	Font = Enum.Font.GothamBold, Text = "SleepScript", TextColor3 = COL.text,
+	TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left,
 }, header)
 
 new("TextLabel", {
-	BackgroundTransparency = 1,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -62, 0.5, 0),
-	Size = UDim2.new(0, 120, 1, 0),
-	Font = Enum.Font.GothamMedium,
-	Text = "v1.1  •  Evade",
-	TextColor3 = COL.dim,
-	TextSize = 11,
-	TextXAlignment = Enum.TextXAlignment.Right,
+	BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -62, 0.5, 0),
+	Size = UDim2.new(0, 120, 1, 0), Font = Enum.Font.GothamMedium, Text = "v1.2  •  Evade",
+	TextColor3 = COL.dim, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right,
 }, header)
 
 local function headerBtn(txt, xOff, fn)
 	local b = new("TextButton", {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, xOff, 0.5, 0),
-		Size = UDim2.new(0, 22, 0, 22),
-		BackgroundColor3 = COL.panel2,
-		Font = Enum.Font.GothamBold,
-		Text = txt,
-		TextColor3 = COL.text,
-		TextSize = 12,
-		AutoButtonColor = false,
+		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, xOff, 0.5, 0),
+		Size = UDim2.new(0, 22, 0, 22), BackgroundColor3 = COL.panel2,
+		Font = Enum.Font.GothamBold, Text = txt, TextColor3 = COL.text,
+		TextSize = 12, AutoButtonColor = false,
 	}, header)
 	corner(5, b)
 	stroke(b, COL.line, 1)
@@ -221,9 +198,7 @@ do
 	conn(header.InputBegan, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			dragStart = input.Position
-			startPos = main.Position
+			dragging, dragStart, startPos = true, input.Position, main.Position
 			conn(input.Changed, function()
 				if input.UserInputState == Enum.UserInputState.End then dragging = false end
 			end)
@@ -241,13 +216,10 @@ end
 
 local TABS = { "Визуал", "Персонаж", "Анимации", "Прочее" }
 local tabBar = new("Frame", {
-	Position = UDim2.new(0, 8, 0, 38),
-	Size = UDim2.new(1, -16, 0, 24),
-	BackgroundTransparency = 1,
+	Position = UDim2.new(0, 8, 0, 38), Size = UDim2.new(1, -16, 0, 24), BackgroundTransparency = 1,
 }, main)
 new("UIListLayout", {
-	FillDirection = Enum.FillDirection.Horizontal,
-	Padding = UDim.new(0, 5),
+	FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 5),
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, tabBar)
 
@@ -255,43 +227,29 @@ local pages, tabBtns = {}, {}
 
 local function makePage()
 	local page = new("Frame", {
-		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 0, 0, 68),
-		Size = UDim2.new(1, 0, 1, -68),
-		Visible = false,
+		BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0, 68),
+		Size = UDim2.new(1, 0, 1, -68), Visible = false,
 	}, main)
 	local scroll = new("ScrollingFrame", {
-		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 10, 0, 0),
-		Size = UDim2.new(1, -20, 1, 0),
-		CanvasSize = UDim2.new(0, 0, 0, 0),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		ScrollBarThickness = 3,
-		ScrollBarImageColor3 = COL.line,
-		BorderSizePixel = 0,
+		BackgroundTransparency = 1, Position = UDim2.new(0, 10, 0, 0),
+		Size = UDim2.new(1, -20, 1, 0), CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
+		ScrollBarImageColor3 = COL.line, BorderSizePixel = 0,
 	}, page)
-	new("UIListLayout", {
-		Padding = UDim.new(0, 7),
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, scroll)
-	new("UIPadding", {
-		PaddingTop = UDim.new(0, 6),
-		PaddingBottom = UDim.new(0, 12),
-	}, scroll)
+	new("UIListLayout", { Padding = UDim.new(0, 7), SortOrder = Enum.SortOrder.LayoutOrder }, scroll)
+	new("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 12) }, scroll)
 	return page, scroll
 end
 
+local SCROLLS = {}
 for i, name in ipairs(TABS) do
 	local page, scroll = makePage()
 	pages[i] = page
+	SCROLLS[i] = scroll
 	local btn = new("TextButton", {
-		Size = UDim2.new(0, 96, 1, 0),
-		BackgroundColor3 = COL.panel,
-		Font = Enum.Font.GothamMedium,
-		Text = name,
-		TextColor3 = COL.dim,
-		TextSize = 12,
-		AutoButtonColor = false,
+		Size = UDim2.new(0, 96, 1, 0), BackgroundColor3 = COL.panel,
+		Font = Enum.Font.GothamMedium, Text = name, TextColor3 = COL.dim,
+		TextSize = 12, AutoButtonColor = false,
 	}, tabBar)
 	corner(6, btn)
 	stroke(btn, COL.line, 1)
@@ -310,14 +268,16 @@ for i, name in ipairs(TABS) do
 	end
 end
 
+local scrollVisual, scrollChar, scrollAnim, scrollMisc =
+	SCROLLS[1], SCROLLS[2], SCROLLS[3], SCROLLS[4]
+
 local activeSlider = nil
 
 local function makeSlider(parent, label, min, max, default, step, onChange)
 	local holder = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 34) }, parent)
 	new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(0.65, 0, 0, 15),
-		Font = Enum.Font.GothamMedium, Text = label, TextColor3 = COL.text,
-		TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		BackgroundTransparency = 1, Size = UDim2.new(0.65, 0, 0, 15), Font = Enum.Font.GothamMedium,
+		Text = label, TextColor3 = COL.text, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
 	}, holder)
 	local valLbl = new("TextLabel", {
 		BackgroundTransparency = 1, Position = UDim2.new(0.65, 0, 0, 0), Size = UDim2.new(0.35, 0, 0, 15),
@@ -336,8 +296,7 @@ local function makeSlider(parent, label, min, max, default, step, onChange)
 	}, track)
 	corner(5, knob)
 	local hit = new("TextButton", {
-		BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0.5, -9),
-		Size = UDim2.new(1, 0, 0, 18), Text = "",
+		BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0.5, -9), Size = UDim2.new(1, 0, 0, 18), Text = "",
 	}, track)
 
 	local value = default
@@ -362,18 +321,15 @@ local function makeSlider(parent, label, min, max, default, step, onChange)
 		end
 	end)
 	render()
-	return {
-		Set = function(v) value = v; render(); if onChange then onChange(v) end end,
-		Get = function() return value end,
-	}
+	return { Set = function(v) value = v; render(); if onChange then onChange(v) end end,
+	         Get = function() return value end }
 end
 
 local function makeToggle(parent, label, default, onChange)
 	local row = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24) }, parent)
 	new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(0.75, 0, 1, 0),
-		Font = Enum.Font.GothamMedium, Text = label, TextColor3 = COL.text,
-		TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		BackgroundTransparency = 1, Size = UDim2.new(0.78, 0, 1, 0), Font = Enum.Font.GothamMedium,
+		Text = label, TextColor3 = COL.text, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
 	}, row)
 	local box = new("Frame", {
 		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
@@ -386,7 +342,6 @@ local function makeToggle(parent, label, default, onChange)
 	}, box)
 	corner(7, knob)
 	local btn = new("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "" }, box)
-
 	local state = default
 	local function render()
 		TweenService:Create(box, TweenInfo.new(0.14),
@@ -407,9 +362,8 @@ local listeningKey = nil
 local function makeKeybind(parent, label, default, onChange)
 	local row = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24) }, parent)
 	new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(0.6, 0, 1, 0),
-		Font = Enum.Font.GothamMedium, Text = label, TextColor3 = COL.text,
-		TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		BackgroundTransparency = 1, Size = UDim2.new(0.6, 0, 1, 0), Font = Enum.Font.GothamMedium,
+		Text = label, TextColor3 = COL.text, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
 	}, row)
 	local btn = new("TextButton", {
 		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
@@ -433,8 +387,7 @@ end
 
 local function makeButton(parent, label, fn, height)
 	local b = new("TextButton", {
-		Size = UDim2.new(1, 0, 0, height or 26),
-		BackgroundColor3 = COL.panel2,
+		Size = UDim2.new(1, 0, 0, height or 26), BackgroundColor3 = COL.panel2,
 		Font = Enum.Font.GothamMedium, Text = label, TextColor3 = COL.text,
 		TextSize = 12, AutoButtonColor = false,
 	}, parent)
@@ -446,38 +399,31 @@ end
 
 local function makeSection(parent, text)
 	new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18),
-		Font = Enum.Font.GothamBold, Text = text, TextColor3 = COL.accent,
-		TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18), Font = Enum.Font.GothamBold,
+		Text = text, TextColor3 = COL.accent, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
 	}, parent)
 end
 
 local function makeLabel(parent, text, color, height)
 	return new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, height or 16),
-		Font = Enum.Font.Gotham, Text = text, TextColor3 = color or COL.dim,
-		TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
-		TextWrapped = true,
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, height or 16), Font = Enum.Font.Gotham,
+		Text = text, TextColor3 = color or COL.dim, TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
 	}, parent)
 end
 
 local function makeTextBox(parent, placeholder, default, fn)
 	local t = new("TextBox", {
-		Size = UDim2.new(1, 0, 0, 26),
-		BackgroundColor3 = COL.panel2,
-		Font = Enum.Font.Gotham, PlaceholderText = placeholder,
-		Text = default or "", TextColor3 = COL.text, TextSize = 12,
-		PlaceholderColor3 = COL.dim, ClearTextOnFocus = false,
+		Size = UDim2.new(1, 0, 0, 26), BackgroundColor3 = COL.panel2, Font = Enum.Font.Gotham,
+		PlaceholderText = placeholder, Text = default or "", TextColor3 = COL.text,
+		TextSize = 12, PlaceholderColor3 = COL.dim, ClearTextOnFocus = false,
 	}, parent)
 	corner(6, t)
 	stroke(t, COL.line, 1)
-	if fn then
-		conn(t.FocusLost, function() fn(t.Text) end)
-	end
+	if fn then conn(t.FocusLost, function() fn(t.Text) end) end
 	return t
 end
 
--- тосты (в отдельном гуи, чтобы не пропадали при закрытом меню)
 local toastHolder = new("Frame", {
 	AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -40),
 	Size = UDim2.new(0, 300, 0, 100), BackgroundTransparency = 1,
@@ -489,15 +435,12 @@ new("UIListLayout", {
 }, toastHolder)
 
 local function toast(text, color)
-	local f = new("Frame", {
-		Size = UDim2.new(0, 260, 0, 24),
-		BackgroundColor3 = COL.panel, BackgroundTransparency = 1,
-	}, toastHolder)
+	local f = new("Frame", { Size = UDim2.new(0, 280, 0, 24), BackgroundColor3 = COL.panel, BackgroundTransparency = 1 }, toastHolder)
 	corner(6, f)
 	stroke(f, color or COL.accent, 1)
 	local l = new("TextLabel", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0),
-		Font = Enum.Font.GothamMedium, Text = text, TextColor3 = COL.text, TextSize = 11,
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0), Font = Enum.Font.GothamMedium,
+		Text = text, TextColor3 = COL.text, TextSize = 11,
 	}, f)
 	TweenService:Create(f, TweenInfo.new(0.15), { BackgroundTransparency = 0 }):Play()
 	TweenService:Create(l, TweenInfo.new(0.15), { TextTransparency = 0 }):Play()
@@ -505,52 +448,56 @@ local function toast(text, color)
 		TweenService:Create(f, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
 		TweenService:Create(l, TweenInfo.new(0.25), { TextTransparency = 1 }):Play()
 		task.wait(0.3)
-		if f then f:Destroy() end
+		if f and f.Parent then f:Destroy() end
 	end)
 end
 
-local scrollVisual = pages[1]:GetChildren()[1]
-local scrollChar   = pages[2]:GetChildren()[1]
-local scrollAnim   = pages[3]:GetChildren()[1]
-local scrollMisc   = pages[4]:GetChildren()[1]
-
---== 4. Оригинальные значения света ==--
+--== 4. Свет: оригинал ==--
 local ORIG = {
-	ClockTime = Lighting.ClockTime,
-	Ambient = Lighting.Ambient,
-	OutdoorAmbient = Lighting.OutdoorAmbient,
-	Brightness = Lighting.Brightness,
-	FogEnd = Lighting.FogEnd,
-	FogStart = Lighting.FogStart,
-	FogColor = Lighting.FogColor,
-	ColorShift_Top = Lighting.ColorShift_Top,
-	ColorShift_Bottom = Lighting.ColorShift_Bottom,
-	GlobalShadows = Lighting.GlobalShadows,
-	ExposureCompensation = Lighting.ExposureCompensation,
+	ClockTime = Lighting.ClockTime, Ambient = Lighting.Ambient,
+	OutdoorAmbient = Lighting.OutdoorAmbient, Brightness = Lighting.Brightness,
+	FogEnd = Lighting.FogEnd, FogStart = Lighting.FogStart, FogColor = Lighting.FogColor,
+	ColorShift_Top = Lighting.ColorShift_Top, ColorShift_Bottom = Lighting.ColorShift_Bottom,
+	GlobalShadows = Lighting.GlobalShadows, ExposureCompensation = Lighting.ExposureCompensation,
 	Outlines = Lighting.Outlines,
 }
 
---== 5. FOV / Свет / Небо ==--
-local function getCam() return workspace.CurrentCamera end
+--== 5. FOV (жёсткий перехват) ==--
+local fovConn = nil
 
 local function setFOV(v)
-	local cam = getCam()
+	CFG.FOV = v
+	local cam = workspace.CurrentCamera
 	if cam then cam.FieldOfView = v end
 end
 
+local function hookCamera()
+	if fovConn then pcall(function() fovConn:Disconnect() end) end
+	local cam = workspace.CurrentCamera
+	if not cam then return end
+	fovConn = cam:GetPropertyChangedSignal("FieldOfView"):Connect(function()
+		if CFG.FOVLock and math.abs(cam.FieldOfView - CFG.FOV) > 0.01 then
+			cam.FieldOfView = CFG.FOV
+		end
+	end)
+end
+conn(workspace:GetPropertyChangedSignal("CurrentCamera"), hookCamera)
+hookCamera()
+
+RunService:BindToRenderStep("SleepScript_FOV", Enum.RenderPriority.Camera.Value + 1, function()
+	if CFG.FOVLock then
+		local cam = workspace.CurrentCamera
+		if cam and math.abs(cam.FieldOfView - CFG.FOV) > 0.01 then
+			cam.FieldOfView = CFG.FOV
+		end
+	end
+end)
+
+--== 6. Свет / небо ==--
 local function resetLighting()
-	Lighting.ClockTime = ORIG.ClockTime
-	Lighting.Ambient = ORIG.Ambient
-	Lighting.OutdoorAmbient = ORIG.OutdoorAmbient
-	Lighting.Brightness = ORIG.Brightness
-	Lighting.FogEnd = ORIG.FogEnd
-	Lighting.FogStart = ORIG.FogStart
-	Lighting.FogColor = ORIG.FogColor
-	Lighting.ColorShift_Top = ORIG.ColorShift_Top
-	Lighting.ColorShift_Bottom = ORIG.ColorShift_Bottom
-	Lighting.GlobalShadows = ORIG.GlobalShadows
-	Lighting.ExposureCompensation = ORIG.ExposureCompensation
-	Lighting.Outlines = ORIG.Outlines
+	for k, v in pairs(ORIG) do
+		pcall(function() Lighting[k] = v end)
+	end
 	local s = Lighting:FindFirstChild("SleepSky")
 	if s then s:Destroy() end
 end
@@ -642,20 +589,18 @@ local function setFullbright(on)
 	end
 end
 
---== 6. Персонаж ==--
+--== 7. Персонаж ==--
 local KORBLOX_ID = 139607718
 local origRightLeg = nil
 
 local function getChar() return LP.Character end
-
 local function getHum(c)
 	c = c or getChar()
 	return c and c:FindFirstChildOfClass("Humanoid")
 end
 
 local function applyHeadless(on)
-	local c = getChar()
-	local head = c and c:FindFirstChild("Head")
+	local head = getChar() and getChar():FindFirstChild("Head")
 	if not head then return end
 	head.Transparency = on and 1 or 0
 	local face = head:FindFirstChildOfClass("Decal")
@@ -711,10 +656,24 @@ local function applyInvisible(on)
 	end
 end
 
---== 7. Анимации (локальный Animator) ==--
-local currentTrack = nil
+--== 8. Анимации ==--
+local PRIORITY = {
+	Core = Enum.AnimationPriority.Core, Idle = Enum.AnimationPriority.Idle,
+	Movement = Enum.AnimationPriority.Movement, Action = Enum.AnimationPriority.Action,
+	Action2 = Enum.AnimationPriority.Action2, Action3 = Enum.AnimationPriority.Action3,
+	Action4 = Enum.AnimationPriority.Action4,
+}
 
-local function ensureAnimator()
+local currentTrack = nil
+local animStatus = nil
+
+local function getDefaultAnimator()
+	local hum = getHum()
+	if not hum then return nil end
+	return hum:FindFirstChildOfClass("Animator")
+end
+
+local function getLocalAnimator()
 	local hum = getHum()
 	if not hum then return nil end
 	local a = hum:FindFirstChild("SleepAnimator")
@@ -726,47 +685,61 @@ local function ensureAnimator()
 	return a
 end
 
-local PRIORITY = {
-	Core = Enum.AnimationPriority.Core,
-	Idle = Enum.AnimationPriority.Idle,
-	Movement = Enum.AnimationPriority.Movement,
-	Action = Enum.AnimationPriority.Action,
-	Action2 = Enum.AnimationPriority.Action2,
-	Action3 = Enum.AnimationPriority.Action3,
-	Action4 = Enum.AnimationPriority.Action4,
-}
+local function removeLocalAnimator()
+	local hum = getHum()
+	if not hum then return end
+	local a = hum:FindFirstChild("SleepAnimator")
+	if a then a:Destroy() end
+end
 
 local function stopAnim()
 	if currentTrack then
 		pcall(function() currentTrack:Stop(0.15) end)
 		currentTrack = nil
 	end
+	if animStatus then animStatus.Text = "Статус: стоп" end
 end
 
 local function playAnim(id)
 	if not id or id == "" then
-		toast("Анимация не выбрана", COL.bad)
+		toast("Введи ID анимации", COL.bad)
 		return
 	end
-	local a = ensureAnimator()
-	if not a then
+	local hum = getHum()
+	if not hum then
 		toast("Нет персонажа", COL.bad)
 		return
 	end
 	stopAnim()
+
+	local animator
+	if CFG.LocalAnimator then
+		animator = getLocalAnimator()
+	else
+		animator = hum:FindFirstChildOfClass("Animator") or getLocalAnimator()
+	end
+	if not animator then
+		toast("Animator не найден", COL.bad)
+		return
+	end
+
 	local full = id:match("^%d+$") and ("rbxassetid://" .. id) or id
 	local anim = Instance.new("Animation")
 	anim.AnimationId = full
-	local ok, track = pcall(function() return a:LoadAnimation(anim) end)
+	pcall(function() ContentProvider:PreloadAsync({ anim }) end)
+
+	local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
 	if not ok or not track then
-		toast("Не удалось загрузить: " .. id, COL.bad)
+		toast("Не удалось: " .. id, COL.bad)
 		return
 	end
+
 	track.Priority = PRIORITY[CFG.AnimPriority] or Enum.AnimationPriority.Action4
 	track.Looped = CFG.AnimLoop
 	track:Play(0.1)
 	track:AdjustSpeed(CFG.AnimSpeed)
 	currentTrack = track
+	if animStatus then animStatus.Text = "Статус: играет" end
 	toast("Анимация: " .. tostring(CFG.AnimName))
 end
 
@@ -778,7 +751,7 @@ local function toggleAnim()
 	end
 end
 
---== 8. Полёт / ноклип ==--
+--== 9. Полёт / ноклип ==--
 local flyBV, flyBG, flyActive = nil, nil, false
 
 local function setFly(on)
@@ -812,7 +785,7 @@ local function flyStep()
 	if not flyActive then return end
 	local c = getChar()
 	local hrp = c and c:FindFirstChild("HumanoidRootPart")
-	local cam = getCam()
+	local cam = workspace.CurrentCamera
 	if not hrp or not cam then return end
 	local dir = Vector3.zero
 	if UIS:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector end
@@ -831,18 +804,19 @@ local function applyNoClip(on)
 	if not c then return end
 	for _, d in ipairs(c:GetDescendants()) do
 		if d:IsA("BasePart") and d.CanCollide == on then
+			d.Collide = not on
 			d.CanCollide = not on
 		end
 	end
 end
 
---== 9. UI: Визуал ==--
+--== 10. UI: Визуал ==--
 makeSection(scrollVisual, "КАМЕРА")
 makeSlider(scrollVisual, "FOV", 40, 130, CFG.FOV, 1, function(v)
-	CFG.FOV = v
 	setFOV(v)
 end)
-makeToggle(scrollVisual, "Держать FOV (анти-сброс)", CFG.FOVLock, function(v) CFG.FOVLock = v end)
+makeToggle(scrollVisual, "Держать FOV (перехват)", CFG.FOVLock, function(v) CFG.FOVLock = v end)
+local fovLive = makeLabel(scrollVisual, "текущий FOV: " .. tostring(math.floor(CFG.FOV)), COL.good)
 
 makeSection(scrollVisual, "НЕБО И СВЕТ")
 local skyLabel = makeLabel(scrollVisual, "Пресет: " .. tostring(CFG.Sky), COL.text)
@@ -871,13 +845,11 @@ local boxLf = makeTextBox(scrollVisual, "Lf (лево)", "")
 local boxRt = makeTextBox(scrollVisual, "Rt (право)", "")
 local boxUp = makeTextBox(scrollVisual, "Up (верх)", "")
 makeButton(scrollVisual, "Применить свой скайбокс", function()
-	setCustomSkybox({
-		bk = boxBk.Text, dn = boxDn.Text, ft = boxFt.Text,
-		lf = boxLf.Text, rt = boxRt.Text, up = boxUp.Text,
-	})
+	setCustomSkybox({ bk = boxBk.Text, dn = boxDn.Text, ft = boxFt.Text,
+		lf = boxLf.Text, rt = boxRt.Text, up = boxUp.Text })
 end)
 
---== 10. UI: Персонаж ==--
+--== 11. UI: Персонаж ==--
 makeSection(scrollChar, "ВНЕШКА (локально)")
 makeToggle(scrollChar, "Headless", CFG.Headless, function(v)
 	CFG.Headless = v
@@ -911,26 +883,27 @@ makeToggle(scrollChar, "Ноклип", CFG.NoClip, function(v) CFG.NoClip = v en
 makeSection(scrollChar, "МАСШТАБ ТЕЛА")
 local function scaleSet(prop, v)
 	local hum = getHum()
-	if hum then
-		pcall(function() hum[prop] = v end)
-	end
+	if hum then pcall(function() hum[prop] = v end) end
 end
 makeSlider(scrollChar, "Рост", 0.6, 1.4, 1, 0.05, function(v) scaleSet("BodyHeightScale", v) end)
 makeSlider(scrollChar, "Ширина", 0.6, 1.4, 1, 0.05, function(v) scaleSet("BodyWidthScale", v) end)
 makeSlider(scrollChar, "Глубина", 0.6, 1.4, 1, 0.05, function(v) scaleSet("BodyDepthScale", v) end)
 makeSlider(scrollChar, "Голова", 0.6, 1.4, 1, 0.05, function(v) scaleSet("HeadScale", v) end)
 
---== 11. UI: Анимации ==--
-makeSection(scrollAnim, "ВЫБРАННАЯ АНИМАЦИЯ")
+--== 12. UI: Анимации ==--
+makeSection(scrollAnim, "СВОЯ АНИМАЦИЯ (по ID)")
 local animLabel = makeLabel(scrollAnim, "Сейчас: " .. tostring(CFG.AnimName), COL.text)
 local animIdBox = makeTextBox(scrollAnim, "ID анимации (только цифры)", CFG.AnimId, function(txt)
-	txt = txt:gsub("%s", "")
+	txt = txt:gsub("[^%d]", "")
 	CFG.AnimId = txt
 	CFG.AnimName = "ID " .. txt
 	animLabel.Text = "Сейчас: " .. CFG.AnimName
 end)
-makeButton(scrollAnim, "▶  Играть", function() playAnim(CFG.AnimId) end)
+animStatus = makeLabel(scrollAnim, "Статус: стоп", COL.dim)
+
+makeButton(scrollAnim, "▶  Играть (по кнопке " .. CFG.AnimKey .. " тоже)", function() playAnim(CFG.AnimId) end)
 makeButton(scrollAnim, "■  Стоп", function() stopAnim() end)
+makeKeybind(scrollAnim, "Кнопка вкл/выкл анимации", CFG.AnimKey, function(k) CFG.AnimKey = k end)
 makeToggle(scrollAnim, "Зациклить", CFG.AnimLoop, function(v)
 	CFG.AnimLoop = v
 	if currentTrack then currentTrack.Looped = v end
@@ -939,10 +912,8 @@ makeSlider(scrollAnim, "Скорость", 0.1, 4, CFG.AnimSpeed, 0.05, function
 	CFG.AnimSpeed = v
 	if currentTrack then pcall(function() currentTrack:AdjustSpeed(v) end) end
 end)
-makeToggle(scrollAnim, "Останавливать при движении", CFG.AnimStopOnMove, function(v) CFG.AnimStopOnMove = v end)
-makeKeybind(scrollAnim, "Кнопка анимации", CFG.AnimKey, function(k) CFG.AnimKey = k end)
 
-makeSection(scrollAnim, "ПРИОРИТЕТ")
+makeSection(scrollAnim, "РЕЖИМ")
 local prioLabel = makeLabel(scrollAnim, "Приоритет: " .. tostring(CFG.AnimPriority), COL.text)
 local PRIO_LIST = { "Core", "Idle", "Movement", "Action", "Action2", "Action3", "Action4" }
 local prioIndex = 7
@@ -955,27 +926,32 @@ makeButton(scrollAnim, "Сменить приоритет →", function()
 	prioLabel.Text = "Приоритет: " .. CFG.AnimPriority
 	if currentTrack then currentTrack.Priority = PRIORITY[CFG.AnimPriority] end
 end)
-makeLabel(scrollAnim, "Action4 перебивает ходьбу/стойку — анимация видна всегда.", COL.dim)
+makeToggle(scrollAnim, "Полностью клиентская (свой Animator)", CFG.LocalAnimator, function(v)
+	CFG.LocalAnimator = v
+	if v then
+		getLocalAnimator()
+		toast("Режим: сервер не видит анимацию")
+	else
+		stopAnim()
+		removeLocalAnimator()
+		toast("Режим: обычный Animator")
+	end
+end)
+makeLabel(scrollAnim, "Выкл — работает всегда и перебивает ходьбу (но трек уходит на сервер). Вкл — 100% локально, сервер и другие игроки не видят.", COL.dim)
 
-makeSection(scrollAnim, "ПОИСК АНИМАЦИЙ ВНУТРИ ИГРЫ")
-makeLabel(scrollAnim, "Сканирует все Animation-объекты игры (включая эвентовые/старые).", COL.dim)
+makeSection(scrollAnim, "СПИСОК АНИМАЦИЙ ИГРЫ")
+makeLabel(scrollAnim, "Собирает анимации, лежащие внутри Evade (в т.ч. старые/ивентовые с 2022). Кэшируется в файл.", COL.dim)
 local searchBox = makeTextBox(scrollAnim, "фильтр по названию...", "")
 local animList = new("ScrollingFrame", {
-	Size = UDim2.new(1, 0, 0, 130),
-	BackgroundColor3 = COL.panel,
-	BorderSizePixel = 0,
-	CanvasSize = UDim2.new(0, 0, 0, 0),
-	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollBarThickness = 3,
-	ScrollBarImageColor3 = COL.line,
+	Size = UDim2.new(1, 0, 0, 140), BackgroundColor3 = COL.panel, BorderSizePixel = 0,
+	CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	ScrollBarThickness = 3, ScrollBarImageColor3 = COL.line,
 }, scrollAnim)
 corner(6, animList)
 stroke(animList, COL.line, 1)
 new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, animList)
-new("UIPadding", {
-	PaddingTop = UDim.new(0, 5), PaddingLeft = UDim.new(0, 6),
-	PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 5),
-}, animList)
+new("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingLeft = UDim.new(0, 6),
+	PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 5) }, animList)
 
 local scanned = {}
 
@@ -986,15 +962,14 @@ local function renderList()
 	local filter = searchBox.Text:lower()
 	local shown = 0
 	for _, item in ipairs(scanned) do
-		if shown >= 200 then break end
+		if shown >= 120 then break end
 		if filter == "" or item.name:lower():find(filter, 1, true) then
 			shown += 1
 			local idShort = item.id:gsub("rbxassetid://", "")
 			local b = new("TextButton", {
-				Size = UDim2.new(1, 0, 0, 20),
-				BackgroundColor3 = COL.panel2,
-				Font = Enum.Font.Gotham, Text = item.name .. "  [" .. idShort .. "]",
-				TextColor3 = COL.text, TextSize = 10, AutoButtonColor = false,
+				Size = UDim2.new(1, 0, 0, 20), BackgroundColor3 = COL.panel2, Font = Enum.Font.Gotham,
+				Text = item.name .. "  [" .. idShort .. "]", TextColor3 = COL.text,
+				TextSize = 10, AutoButtonColor = false,
 				TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 			}, animList)
 			corner(4, b)
@@ -1009,78 +984,99 @@ local function renderList()
 	end
 	if shown == 0 then
 		new("TextLabel", {
-			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20),
-			Font = Enum.Font.Gotham, Text = "Ничего не найдено",
-			TextColor3 = COL.dim, TextSize = 10,
+			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), Font = Enum.Font.Gotham,
+			Text = "Пусто — нажми «Собрать анимации»", TextColor3 = COL.dim, TextSize = 10,
 		}, animList)
 	end
 end
 conn(searchBox:GetPropertyChangedSignal("Text"), renderList)
 
-makeButton(scrollAnim, "🔍  Сканировать анимации игры", function()
-	toast("Сканирую...")
+local function saveCache()
+	if not writefile then return end
+	pcall(function() writefile(ANIM_CACHE, HttpService:JSONEncode(scanned)) end)
+end
+
+local function loadCache()
+	if not readfile or not isfile then return end
+	pcall(function()
+		if isfile(ANIM_CACHE) then
+			local data = HttpService:JSONDecode(readfile(ANIM_CACHE))
+			if type(data) == "table" and #data > 0 then
+				scanned = data
+				renderList()
+			end
+		end
+	end)
+end
+
+makeButton(scrollAnim, "Собрать анимации (быстро)", function()
 	task.spawn(function()
-		local seen, count = {}, 0
-		table.clear(scanned)
-		for _, obj in ipairs(game:GetDescendants()) do
-			if obj:IsA("Animation") then
-				local id = obj.AnimationId
-				if id and id ~= "" and not seen[id] then
-					seen[id] = true
-					count += 1
-					scanned[count] = { name = obj:GetFullName(), id = id }
+		local roots = {}
+		local rs = game:GetService("ReplicatedStorage")
+		table.insert(roots, rs)
+		for _, n in ipairs({ "Animations", "Emotes", "Anim", "Shared", "Assets", "Modules" }) do
+			local f = rs:FindFirstChild(n)
+			if f then table.insert(roots, f) end
+		end
+		table.insert(roots, workspace)
+
+		local seen, out = {}, {}
+		for _, root in ipairs(roots) do
+			for _, obj in ipairs(root:GetDescendants()) do
+				if obj:IsA("Animation") then
+					local id = obj.AnimationId
+					if id and id ~= "" and not seen[id] then
+						seen[id] = true
+						table.insert(out, { name = obj:GetFullName(), id = id })
+					end
 				end
 			end
 		end
-		table.sort(scanned, function(a, b) return a.name < b.name end)
+		table.sort(out, function(a, b) return a.name < b.name end)
+		scanned = out
 		renderList()
-		toast("Найдено анимаций: " .. count, COL.good)
+		saveCache()
+		toast("Найдено анимаций: " .. #out, #out > 0 and COL.good or COL.bad)
 	end)
 end)
+loadCache()
 
-makeSection(scrollAnim, "БАЗОВЫЕ АНИМАЦИИ (R15)")
+makeSection(scrollAnim, "ГОТОВЫЕ (R15 — актуальный риг Evade)")
 local R15 = {
-	{ "R15 Idle 1", "507766666" }, { "R15 Idle 2", "782845736" },
-	{ "R15 Walk", "507777826" }, { "R15 Run", "507767714" },
-	{ "R15 Jump", "507765000" }, { "R15 Fall", "507767968" },
-	{ "R15 Swim", "507784897" }, { "R15 Climb", "507765644" },
-	{ "R15 Wave", "507770239" }, { "R15 Point", "507770453" },
-	{ "R15 Dance 1", "507771019" }, { "R15 Dance 2", "507771955" },
-	{ "R15 Dance 3", "507772104" }, { "R15 Dance 2A", "507776043" },
-	{ "R15 Dance 3A", "507777268" }, { "R15 Laugh", "507770818" },
-	{ "R15 Cheer", "507770677" }, { "R15 Sit", "507768133" },
+	{ "Idle 1", "507766666" }, { "Idle 2", "782845736" }, { "Walk", "507777826" },
+	{ "Run", "507767714" }, { "Jump", "507765000" }, { "Fall", "507767968" },
+	{ "Swim", "507784897" }, { "Climb", "507765644" }, { "Wave", "507770239" },
+	{ "Point", "507770453" }, { "Dance 1", "507771019" }, { "Dance 2", "507771955" },
+	{ "Dance 3", "507772104" }, { "Dance 2A", "507776043" }, { "Dance 3A", "507777268" },
+	{ "Laugh", "507770818" }, { "Cheer", "507770677" }, { "Sit", "507768133" },
 }
 for _, a in ipairs(R15) do
 	makeButton(scrollAnim, a[1] .. "  •  " .. a[2], function()
-		CFG.AnimId = a[2]
-		CFG.AnimName = a[1]
+		CFG.AnimId, CFG.AnimName = a[2], "R15 " .. a[1]
 		animLabel.Text = "Сейчас: " .. CFG.AnimName
 		animIdBox.Text = a[2]
 		playAnim(a[2])
 	end, 22)
 end
 
-makeSection(scrollAnim, "БАЗОВЫЕ АНИМАЦИИ (R6 / классика)")
+makeSection(scrollAnim, "ГОТОВЫЕ (R6 — классика)")
 local R6 = {
-	{ "R6 Idle 1", "180435571" }, { "R6 Idle 2", "180435792" },
-	{ "R6 Walk", "180426354" }, { "R6 Jump", "125750702" },
-	{ "R6 Fall", "180436148" }, { "R6 Climb", "180436334" },
-	{ "R6 Wave", "128777973" }, { "R6 Point", "128853357" },
-	{ "R6 Dance 1", "182435998" }, { "R6 Dance 2", "182436842" },
-	{ "R6 Dance 3", "182436976" }, { "R6 Laugh", "129423131" },
-	{ "R6 Cheer", "129423030" },
+	{ "Idle 1", "180435571" }, { "Idle 2", "180435792" }, { "Walk", "180426354" },
+	{ "Jump", "125750702" }, { "Fall", "180436148" }, { "Climb", "180436334" },
+	{ "Wave", "128777973" }, { "Point", "128853357" }, { "Dance 1", "182435998" },
+	{ "Dance 2", "182436842" }, { "Dance 3", "182436976" }, { "Laugh", "129423131" },
+	{ "Cheer", "129423030" },
 }
 for _, a in ipairs(R6) do
 	makeButton(scrollAnim, a[1] .. "  •  " .. a[2], function()
-		CFG.AnimId = a[2]
-		CFG.AnimName = a[1]
+		CFG.AnimId, CFG.AnimName = a[2], "R6 " .. a[1]
 		animLabel.Text = "Сейчас: " .. CFG.AnimName
 		animIdBox.Text = a[2]
 		playAnim(a[2])
 	end, 22)
 end
 
---== 12. UI: Прочее ==--
+--== 13. UI: Прочее ==--
 makeSection(scrollMisc, "ОБХОД АНТИЧИТА")
 local acToggles = {}
 makeToggle(scrollMisc, "Обход античита (все петли)", CFG.ACBypass, function(v)
@@ -1134,7 +1130,7 @@ makeButton(scrollMisc, "Сохранить конфиг", function()
 end)
 makeButton(scrollMisc, "Загрузить конфиг", function()
 	loadCFG()
-	toast("Конфиг загружен (перезайди в игру для полного применения)", COL.good)
+	toast("Конфиг загружен", COL.good)
 end)
 makeButton(scrollMisc, "Выгрузить SleepScript", function()
 	if API.Unload then API.Unload() end
@@ -1142,18 +1138,16 @@ end)
 
 makeLabel(scrollMisc, CFG.MenuKey .. " — меню  •  " .. CFG.AnimKey .. " — анимация  •  " .. CFG.FlyKey .. " — полёт", COL.dim)
 
---== 13. Ввод ==--
+--== 14. Ввод ==--
 conn(UIS.InputBegan, function(input)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local name = input.KeyCode.Name
-
 	if listeningKey then
 		listeningKey(name)
 		listeningKey = nil
 		return
 	end
 	if UIS:GetFocusedTextBox() then return end
-
 	if name == CFG.MenuKey then
 		gui.Enabled = not gui.Enabled
 	elseif name == CFG.AnimKey then
@@ -1177,13 +1171,10 @@ conn(UIS.InputEnded, function(input)
 	end
 end)
 
---== 14. Главный цикл ==--
-local acc = { korblox = 0, appearance = 0 }
+--== 15. Главный цикл ==--
+local acc = { korblox = 0, appearance = 0, suppress = 0, fov = 0 }
 
 conn(RunService.RenderStepped, function(dt)
-	local cam = getCam()
-	if CFG.FOVLock and cam then cam.FieldOfView = CFG.FOV end
-
 	local c = getChar()
 	local hum = getHum(c)
 
@@ -1197,6 +1188,20 @@ conn(RunService.RenderStepped, function(dt)
 
 	if CFG.NoClip then applyNoClip(true) end
 	if CFG.Fly then flyStep() end
+
+	-- в локальном режиме глушим дефолтные треки, чтобы не было смешивания
+	if CFG.LocalAnimator and currentTrack and currentTrack.IsPlaying then
+		acc.suppress += dt
+		if acc.suppress >= 0.08 then
+			acc.suppress = 0
+			local da = getDefaultAnimator()
+			if da then
+				for _, t in ipairs(da:GetPlayingAnimationTracks()) do
+					pcall(function() t:Stop(0.08) end)
+				end
+			end
+		end
+	end
 
 	acc.appearance += dt
 	if acc.appearance >= 0.35 then
@@ -1224,14 +1229,15 @@ conn(RunService.RenderStepped, function(dt)
 		end)
 	end
 
-	if CFG.AnimStopOnMove and currentTrack and hum then
-		if hum.MoveDirection.Magnitude > 0.1 and currentTrack.IsPlaying then
-			stopAnim()
-		end
+	acc.fov += dt
+	if acc.fov >= 0.25 and fovLive then
+		acc.fov = 0
+		local cam = workspace.CurrentCamera
+		if cam then fovLive.Text = "текущий FOV: " .. tostring(math.floor(cam.FieldOfView + 0.5)) end
 	end
 end)
 
---== 15. Респавн ==--
+--== 16. Респавн ==--
 local function onCharacter(char)
 	currentTrack = nil
 	origRightLeg = nil
@@ -1253,23 +1259,23 @@ end
 conn(LP.CharacterAdded, onCharacter)
 if LP.Character then task.spawn(onCharacter, LP.Character) end
 
---== 16. Инициализация ==--
+--== 17. Инициализация ==--
 setFOV(CFG.FOV)
-if CFG.Fullbright then
-	setFullbright(true)
-elseif CFG.Sky ~= "По умолчанию" then
-	applySky(CFG.Sky)
-end
-toast("SleepScript загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
+if CFG.Fullbright then setFullbright(true) elseif CFG.Sky ~= "По умолчанию" then applySky(CFG.Sky) end
+if CFG.LocalAnimator then getLocalAnimator() end
+toast("SleepScript v1.2 загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
 
---== 17. Выгрузка ==--
+--== 18. Выгрузка ==--
 function API.Unload()
 	for _, c in ipairs(CONNS) do pcall(function() c:Disconnect() end) end
+	pcall(function() RunService:UnbindFromRenderStep("SleepScript_FOV") end)
+	if fovConn then pcall(function() fovConn:Disconnect() end) end
 	stopAnim()
+	removeLocalAnimator()
 	if flyBV then flyBV:Destroy() end
 	if flyBG then flyBG:Destroy() end
 	resetLighting()
-	local cam = getCam()
+	local cam = workspace.CurrentCamera
 	if cam then cam.FieldOfView = 70 end
 	local c = getChar()
 	if c then
