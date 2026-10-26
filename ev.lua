@@ -1,6 +1,7 @@
 --=========================================================================
---  SleepScript  v1.4   |   Evade   |   client-side
---  Меню: Z   |   Полёт: F
+--  SleepScript  v1.5   |   Evade   |   client-side
+--  Меню: Z
+--  Осталось: FOV, небо/свет, внешка (правая нога, headless, аксессуары, невидимость), ноклип
 --=========================================================================
 
 if getgenv and getgenv().SleepScript and getgenv().SleepScript.Unload then
@@ -25,19 +26,12 @@ local CFG = {
 	FOVLock       = true,
 	Fullbright    = false,
 	Sky           = "По умолчанию",
+	KeepLook      = true,
 	Headless      = false,
 	NoRightLeg    = false,
 	NoAccessories = false,
 	Invisible     = false,
 	NoClip        = false,
-	KeepSpeed     = true,
-	Speed         = 16,
-	KeepJump      = true,
-	Jump          = 50,
-	Fly           = false,
-	FlySpeed      = 60,
-	FlyKey        = "F",
-	ACBypass      = true,
 }
 
 local COL = {
@@ -71,11 +65,6 @@ local function loadCFG()
 	end)
 end
 loadCFG()
-
--- обход античита включён -> все петли обязаны быть включены
-if CFG.ACBypass then
-	CFG.KeepSpeed, CFG.KeepJump, CFG.FOVLock = true, true, true
-end
 
 --== 2. Хелперы ==--
 local CONNS = {}
@@ -141,8 +130,8 @@ local guiNotify = makeGui("SleepScriptNotify", 1000)
 
 local main = new("Frame", {
 	Name = "Main",
-	Size = UDim2.new(0, 480, 0, 348),
-	Position = UDim2.new(0.5, -240, 0.5, -174),
+	Size = UDim2.new(0, 480, 0, 320),
+	Position = UDim2.new(0.5, -240, 0.5, -160),
 	BackgroundColor3 = COL.bg,
 	BorderSizePixel = 0,
 	ClipsDescendants = true,
@@ -163,7 +152,7 @@ new("TextLabel", {
 
 new("TextLabel", {
 	BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -62, 0.5, 0),
-	Size = UDim2.new(0, 120, 1, 0), Font = Enum.Font.GothamMedium, Text = "v1.4  •  Evade",
+	Size = UDim2.new(0, 120, 1, 0), Font = Enum.Font.GothamMedium, Text = "v1.5  •  Evade",
 	TextColor3 = COL.dim, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right,
 }, header)
 
@@ -184,7 +173,7 @@ headerBtn("✕", -10, function() gui.Enabled = false end)
 local minimized = false
 headerBtn("–", -36, function()
 	minimized = not minimized
-	main.Size = minimized and UDim2.new(0, 480, 0, 34) or UDim2.new(0, 480, 0, 348)
+	main.Size = minimized and UDim2.new(0, 480, 0, 34) or UDim2.new(0, 480, 0, 320)
 end)
 
 do
@@ -345,7 +334,7 @@ local function makeToggle(parent, label, default, onChange)
 	conn(btn.MouseButton1Click, function()
 		state = not state
 		render()
-		if onChange then onChange(state) end
+		if onChange then pcall(onChange, state) end
 	end)
 	return { Set = function(v) state = v; render() end, Get = function() return state end }
 end
@@ -385,7 +374,7 @@ local function makeButton(parent, label, fn, height)
 	}, parent)
 	corner(6, b)
 	stroke(b, COL.line, 1)
-	conn(b.MouseButton1Click, fn)
+	conn(b.MouseButton1Click, function() pcall(fn) end)
 	return b
 end
 
@@ -476,13 +465,15 @@ end
 conn(workspace:GetPropertyChangedSignal("CurrentCamera"), hookCamera)
 hookCamera()
 
-RunService:BindToRenderStep("SleepScript_FOV", Enum.RenderPriority.Camera.Value + 1, function()
-	if CFG.FOVLock then
-		local cam = workspace.CurrentCamera
-		if cam and math.abs(cam.FieldOfView - CFG.FOV) > 0.01 then
-			cam.FieldOfView = CFG.FOV
+pcall(function()
+	RunService:BindToRenderStep("SleepScript_FOV", Enum.RenderPriority.Camera.Value + 1, function()
+		if CFG.FOVLock then
+			local cam = workspace.CurrentCamera
+			if cam and math.abs(cam.FieldOfView - CFG.FOV) > 0.01 then
+				cam.FieldOfView = CFG.FOV
+			end
 		end
-	end
+	end)
 end)
 
 --== 6. Свет / небо ==--
@@ -588,19 +579,31 @@ local function getHum(c)
 	return c and c:FindFirstChildOfClass("Humanoid")
 end
 
+-- имена как запасной вариант, если GetLimb недоступен
 local LEG_NAMES = {
 	RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
-	["Right Leg"] = true, RightLeg = true, RightLowerLeg = true,
+	["Right Leg"] = true, RightLeg = true,
 }
 
-local function collectLegParts(c)
-	local t = {}
-	for _, d in ipairs(c:GetDescendants()) do
-		if d:IsA("BasePart") and LEG_NAMES[d.Name] then
-			t[#t + 1] = d
-		end
-	end
-	return t
+-- главный способ: определяем конечность через Humanoid:GetLimb (не зависит от имён и от R6/R15)
+local function limbOf(hum, part)
+	local ok, limb = pcall(function() return hum:GetLimb(part) end)
+	if ok then return limb end
+	return nil
+end
+
+local function isRightLeg(hum, part)
+	local limb = limbOf(hum, part)
+	if limb == Enum.Limb.RightLeg then return true end
+	if limb and limb ~= Enum.Limb.Unknown then return false end
+	return LEG_NAMES[part.Name] == true
+end
+
+local function isHeadPart(hum, part)
+	local limb = limbOf(hum, part)
+	if limb == Enum.Limb.Head then return true end
+	if limb and limb ~= Enum.Limb.Unknown then return false end
+	return part.Name == "Head"
 end
 
 local function isWeldedTo(acc, part)
@@ -614,13 +617,107 @@ local function isWeldedTo(acc, part)
 	return false
 end
 
--- полное применение (с восстановлением того, что больше не нужно скрывать)
+local cache = { char = nil, hum = nil, leg = {}, legAcc = {}, head = nil, face = nil }
+
+local function rebuildCache()
+	local c = getChar()
+	local hum = getHum(c)
+	if not c or not hum then
+		cache = { char = nil, hum = nil, leg = {}, legAcc = {}, head = nil, face = nil }
+		return
+	end
+	if cache.char == c and cache.hum == hum and cache.leg[1] and cache.leg[1].Parent == c then return end
+
+	local leg, legAcc, head, face = {}, {}, nil, nil
+
+	for _, d in ipairs(c:GetDescendants()) do
+		if d:IsA("BasePart") then
+			if isRightLeg(hum, d) then leg[#leg + 1] = d end
+			if isHeadPart(hum, d) then head = d end
+		end
+	end
+
+	for _, acc in ipairs(c:GetChildren()) do
+		if acc:IsA("Accessory") or acc:IsA("Hat") then
+			local h = acc:FindFirstChild("Handle")
+			if h then
+				for _, p in ipairs(leg) do
+					if isWeldedTo(acc, p) then legAcc[#legAcc + 1] = h break end
+				end
+			end
+		end
+	end
+
+	if head then
+		for _, d in ipairs(head:GetChildren()) do
+			if d:IsA("Decal") then face = d end
+		end
+	end
+
+	cache = { char = c, hum = hum, leg = leg, legAcc = legAcc, head = head, face = face }
+end
+
+local function legCount()
+	rebuildCache()
+	return #cache.leg, #cache.legAcc
+end
+
+-- принудительное удержание каждый кадр
+local function enforce()
+	if not CFG.KeepLook then return end
+	local c = getChar()
+	local hum = getHum(c)
+	if not c or not hum then return end
+
+	rebuildCache()
+
+	if CFG.Invisible then
+		for _, d in ipairs(c:GetDescendants()) do
+			if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Transparency ~= 1 then
+				d.Transparency = 1
+			end
+		end
+		if cache.head and cache.head.Transparency ~= 1 then cache.head.Transparency = 1 end
+		if cache.face and cache.face.Transparency ~= 1 then cache.face.Transparency = 1 end
+		return
+	end
+
+	if CFG.NoRightLeg then
+		for _, p in ipairs(cache.leg) do
+			if p.Transparency ~= 1 then p.Transparency = 1 end
+			if p.CanCollide then p.CanCollide = false end
+		end
+		for _, h in ipairs(cache.legAcc) do
+			if h.Transparency ~= 1 then h.Transparency = 1 end
+		end
+	end
+
+	if CFG.Headless then
+		if cache.head and cache.head.Transparency ~= 1 then cache.head.Transparency = 1 end
+		if cache.face and cache.face.Transparency ~= 1 then cache.face.Transparency = 1 end
+	end
+
+	if CFG.NoAccessories then
+		for _, d in ipairs(c:GetChildren()) do
+			if d:IsA("Accessory") or d:IsA("Hat") then
+				local h = d:FindFirstChild("Handle")
+				if h and h.Transparency ~= 1 then h.Transparency = 1 end
+			end
+		end
+	end
+end
+
+-- полное применение с восстановлением
 local function reapplyAll()
 	local c = getChar()
-	if not c then return end
+	local hum = getHum(c)
+	if not c or not hum then return end
+	rebuildCache()
 
 	local legSet = {}
-	for _, p in ipairs(collectLegParts(c)) do legSet[p] = true end
+	for _, p in ipairs(cache.leg) do legSet[p] = true end
+	local legAccSet = {}
+	for _, h in ipairs(cache.legAcc) do legAccSet[h] = true end
 
 	for _, d in ipairs(c:GetDescendants()) do
 		if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
@@ -635,85 +732,14 @@ local function reapplyAll()
 		elseif d:IsA("Accessory") or d:IsA("Hat") then
 			local h = d:FindFirstChild("Handle")
 			if h then
-				local hide = CFG.NoAccessories
-				for p in pairs(legSet) do
-					if isWeldedTo(d, p) then hide = hide or CFG.NoRightLeg end
-				end
+				local hide = CFG.NoAccessories or legAccSet[h]
 				h.Transparency = hide and 1 or 0
 			end
 		end
 	end
 
-	local head = c:FindFirstChild("Head")
-	if head then head.Transparency = (CFG.Headless or CFG.Invisible) and 1 or 0 end
-end
-
--- быстрая проверка каждый кадр
-local legCache = { char = nil, parts = {}, handles = {} }
-
-local function refreshLegCache()
-	local c = getChar()
-	if not c then
-		legCache = { char = nil, parts = {}, handles = {} }
-		return
-	end
-	if legCache.char == c and legCache.parts[1] and legCache.parts[1].Parent == c then return end
-
-	local parts, handles = {}, {}
-	for _, p in ipairs(collectLegParts(c)) do parts[#parts + 1] = p end
-	for _, acc in ipairs(c:GetChildren()) do
-		if acc:IsA("Accessory") or acc:IsA("Hat") then
-			local h = acc:FindFirstChild("Handle")
-			if h then
-				for _, p in ipairs(parts) do
-					if isWeldedTo(acc, p) then handles[#handles + 1] = h break end
-				end
-			end
-		end
-	end
-	legCache = { char = c, parts = parts, handles = handles }
-end
-
-local function enforce()
-	local c = getChar()
-	if not c then return end
-
-	if CFG.Invisible then
-		for _, d in ipairs(c:GetDescendants()) do
-			if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Transparency ~= 1 then
-				d.Transparency = 1
-			end
-		end
-		return
-	end
-
-	if CFG.NoRightLeg then
-		refreshLegCache()
-		for _, p in ipairs(legCache.parts) do
-			if p.Transparency ~= 1 then p.Transparency = 1 end
-			if p.CanCollide then p.CanCollide = false end
-		end
-		for _, h in ipairs(legCache.handles) do
-			if h.Transparency ~= 1 then h.Transparency = 1 end
-		end
-	end
-
-	if CFG.Headless then
-		local head = c:FindFirstChild("Head")
-		if head then
-			if head.Transparency ~= 1 then head.Transparency = 1 end
-			local face = head:FindFirstChildOfClass("Decal")
-			if face and face.Transparency ~= 1 then face.Transparency = 1 end
-		end
-	end
-
-	if CFG.NoAccessories then
-		for _, d in ipairs(c:GetChildren()) do
-			if d:IsA("Accessory") or d:IsA("Hat") then
-				local h = d:FindFirstChild("Handle")
-				if h and h.Transparency ~= 1 then h.Transparency = 1 end
-			end
-		end
+	if cache.head then
+		cache.head.Transparency = (CFG.Headless or CFG.Invisible) and 1 or 0
 	end
 end
 
@@ -727,78 +753,7 @@ local function applyNoClip(on)
 	end
 end
 
---== 8. WalkSpeed / JumpPower: перехват ==--
-local speedHum, speedConn, jumpConn = nil, nil, nil
-
-local function hookHumanoid()
-	local hum = getHum()
-	if not hum or hum == speedHum then return end
-	if speedConn then pcall(function() speedConn:Disconnect() end) end
-	if jumpConn then pcall(function() jumpConn:Disconnect() end) end
-	speedHum = hum
-
-	speedConn = hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-		if CFG.KeepSpeed and hum.WalkSpeed ~= CFG.Speed then
-			hum.WalkSpeed = CFG.Speed
-		end
-	end)
-	jumpConn = hum:GetPropertyChangedSignal("JumpPower"):Connect(function()
-		if CFG.KeepJump and hum.JumpPower ~= CFG.Jump then
-			hum.UseJumpPower = true
-			hum.JumpPower = CFG.Jump
-		end
-	end)
-end
-
---== 9. Полёт ==--
-local flyBV, flyBG, flyActive = nil, nil, false
-
-local function setFly(on)
-	flyActive = on
-	local c = getChar()
-	local hrp = c and c:FindFirstChild("HumanoidRootPart")
-	local hum = getHum(c)
-	if on and hrp and hum then
-		flyBV = Instance.new("BodyVelocity")
-		flyBV.Name = "SleepFly"
-		flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-		flyBV.Velocity = Vector3.zero
-		flyBV.Parent = hrp
-		flyBG = Instance.new("BodyGyro")
-		flyBG.Name = "SleepGyro"
-		flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
-		flyBG.P = 1200
-		flyBG.D = 120
-		flyBG.Parent = hrp
-		hum.PlatformStand = true
-		toast("Полёт: ВКЛ")
-	else
-		if flyBV then flyBV:Destroy(); flyBV = nil end
-		if flyBG then flyBG:Destroy(); flyBG = nil end
-		if hum then hum.PlatformStand = false end
-		toast("Полёт: ВЫКЛ")
-	end
-end
-
-local function flyStep()
-	if not flyActive then return end
-	local c = getChar()
-	local hrp = c and c:FindFirstChild("HumanoidRootPart")
-	local cam = workspace.CurrentCamera
-	if not hrp or not cam then return end
-	local dir = Vector3.zero
-	if UIS:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector end
-	if UIS:IsKeyDown(Enum.KeyCode.S) then dir -= cam.CFrame.LookVector end
-	if UIS:IsKeyDown(Enum.KeyCode.A) then dir -= cam.CFrame.RightVector end
-	if UIS:IsKeyDown(Enum.KeyCode.D) then dir += cam.CFrame.RightVector end
-	if UIS:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0, 1, 0) end
-	if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0, 1, 0) end
-	if dir.Magnitude > 0 then dir = dir.Unit end
-	if flyBV then flyBV.Velocity = dir * CFG.FlySpeed end
-	if flyBG then flyBG.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.CFrame.LookVector) end
-end
-
---== 10. UI: Визуал ==--
+--== 8. UI: Визуал ==--
 makeSection(scrollVisual, "КАМЕРА")
 makeSlider(scrollVisual, "FOV", 40, 130, CFG.FOV, 1, function(v) setFOV(v) end)
 makeToggle(scrollVisual, "Держать FOV (перехват)", CFG.FOVLock, function(v) CFG.FOVLock = v end)
@@ -835,15 +790,27 @@ makeButton(scrollVisual, "Применить свой скайбокс", functio
 		lf = boxLf.Text, rt = boxRt.Text, up = boxUp.Text })
 end)
 
---== 11. UI: Персонаж ==--
+--== 9. UI: Персонаж ==--
 makeSection(scrollChar, "ВНЕШКА (локально)")
 makeToggle(scrollChar, "Headless", CFG.Headless, function(v)
 	CFG.Headless = v
 	reapplyAll()
+	if v then
+		rebuildCache()
+		toast(cache.head and "Голова найдена и скрыта" or "Голова НЕ найдена", cache.head and COL.good or COL.bad)
+	end
 end)
 makeToggle(scrollChar, "Убрать правую ногу (+ одежда на ней)", CFG.NoRightLeg, function(v)
 	CFG.NoRightLeg = v
 	reapplyAll()
+	if v then
+		local parts, accs = legCount()
+		if parts > 0 then
+			toast("Частей ноги: " .. parts .. ", одежды: " .. accs, COL.good)
+		else
+			toast("Правая нога НЕ найдена!", COL.bad)
+		end
+	end
 end)
 makeToggle(scrollChar, "Убрать все аксессуары", CFG.NoAccessories, function(v)
 	CFG.NoAccessories = v
@@ -855,53 +822,21 @@ makeToggle(scrollChar, "Невидимость", CFG.Invisible, function(v)
 end)
 makeToggle(scrollChar, "Ноклип", CFG.NoClip, function(v) CFG.NoClip = v end)
 
-local diag = makeLabel(scrollChar, "детали ноги: поиск...", COL.dim)
+local diag = makeLabel(scrollChar, "поиск частей...", COL.dim)
 makeButton(scrollChar, "Переприменить внешку", function()
 	reapplyAll()
-	toast("Внешка применена", COL.good)
+	local parts, accs = legCount()
+	toast("Нога: " .. parts .. " частей, " .. accs .. " одежды", parts > 0 and COL.good or COL.bad)
 end)
 
---== 12. UI: Прочее ==--
+--== 10. UI: Прочее ==--
 makeSection(scrollMisc, "ОБХОД АНТИЧИТА")
-local acToggles = {}
-makeToggle(scrollMisc, "Обход античита (все петли)", CFG.ACBypass, function(v)
-	CFG.ACBypass = v
-	CFG.KeepSpeed, CFG.KeepJump, CFG.FOVLock = v, v, v
-	if acToggles.speed then acToggles.speed.Set(v) end
-	if acToggles.jump then acToggles.jump.Set(v) end
-	if acToggles.fov then acToggles.fov.Set(v) end
-	toast(v and "Обход античита: ВКЛ" or "Обход античита: ВЫКЛ")
+makeToggle(scrollMisc, "Держать внешку (анти-сброс)", CFG.KeepLook, function(v)
+	CFG.KeepLook = v
+	reapplyAll()
+	toast(v and "Анти-сброс внешки: ВКЛ" or "Анти-сброс внешки: ВЫКЛ")
 end)
-acToggles.speed = makeToggle(scrollMisc, "Держать WalkSpeed", CFG.KeepSpeed, function(v) CFG.KeepSpeed = v end)
-acToggles.jump = makeToggle(scrollMisc, "Держать JumpPower", CFG.KeepJump, function(v) CFG.KeepJump = v end)
-acToggles.fov = makeToggle(scrollMisc, "Держать FOV", CFG.FOVLock, function(v) CFG.FOVLock = v end)
-makeLabel(scrollMisc, "Сервер Evade перезаписывает Humanoid — перехват гасит его запись в тот же кадр.", COL.dim)
-
-makeSection(scrollMisc, "ДВИЖЕНИЕ")
-makeSlider(scrollMisc, "WalkSpeed", 8, 200, CFG.Speed, 1, function(v)
-	CFG.Speed = v
-	CFG.KeepSpeed = true
-	if acToggles.speed then acToggles.speed.Set(true) end
-	local hum = getHum()
-	if hum then hum.WalkSpeed = v end
-end)
-makeSlider(scrollMisc, "JumpPower", 30, 300, CFG.Jump, 1, function(v)
-	CFG.Jump = v
-	CFG.KeepJump = true
-	if acToggles.jump then acToggles.jump.Set(true) end
-	local hum = getHum()
-	if hum then
-		hum.UseJumpPower = true
-		hum.JumpPower = v
-	end
-end)
-local speedLive = makeLabel(scrollMisc, "в игре: —", COL.good)
-makeToggle(scrollMisc, "Полёт", CFG.Fly, function(v)
-	CFG.Fly = v
-	setFly(v)
-end)
-makeKeybind(scrollMisc, "Кнопка полёта", CFG.FlyKey, function(k) CFG.FlyKey = k end)
-makeSlider(scrollMisc, "Скорость полёта", 10, 250, CFG.FlySpeed, 1, function(v) CFG.FlySpeed = v end)
+makeLabel(scrollMisc, "Внешка проверяется и возвращается каждый кадр — игра не может её откатить.", COL.dim)
 
 makeSection(scrollMisc, "УТИЛИТЫ")
 makeKeybind(scrollMisc, "Кнопка меню", CFG.MenuKey, function(k) CFG.MenuKey = k end)
@@ -909,12 +844,6 @@ makeButton(scrollMisc, "Переприменить всё", function()
 	reapplyAll()
 	setFOV(CFG.FOV)
 	if CFG.Fullbright then setFullbright(true) else applySky(CFG.Sky) end
-	local hum = getHum()
-	if hum then
-		hum.WalkSpeed = CFG.Speed
-		hum.UseJumpPower = true
-		hum.JumpPower = CFG.Jump
-	end
 	toast("Применено", COL.good)
 end)
 makeButton(scrollMisc, "Сохранить конфиг", function()
@@ -929,9 +858,9 @@ makeButton(scrollMisc, "Выгрузить SleepScript", function()
 	if API.Unload then API.Unload() end
 end)
 
-makeLabel(scrollMisc, CFG.MenuKey .. " — меню  •  " .. CFG.FlyKey .. " — полёт", COL.dim)
+makeLabel(scrollMisc, CFG.MenuKey .. " — открыть/закрыть меню", COL.dim)
 
---== 13. Ввод ==--
+--== 11. Ввод ==--
 conn(UIS.InputBegan, function(input)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local name = input.KeyCode.Name
@@ -943,9 +872,6 @@ conn(UIS.InputBegan, function(input)
 	if UIS:GetFocusedTextBox() then return end
 	if name == CFG.MenuKey then
 		gui.Enabled = not gui.Enabled
-	elseif name == CFG.FlyKey then
-		CFG.Fly = not CFG.Fly
-		setFly(CFG.Fly)
 	end
 end)
 
@@ -962,38 +888,27 @@ conn(UIS.InputEnded, function(input)
 	end
 end)
 
---== 14. Главный цикл (каждый кадр) ==--
+--== 12. Цикл (каждый кадр, с защитой от ошибок) ==--
 local acc = { diag = 0, fov = 0 }
 
 conn(RunService.RenderStepped, function(dt)
-	local c = getChar()
-	local hum = getHum(c)
-
-	if hum then
-		if CFG.KeepSpeed and hum.WalkSpeed ~= CFG.Speed then hum.WalkSpeed = CFG.Speed end
-		if CFG.KeepJump and hum.JumpPower ~= CFG.Jump then
-			hum.UseJumpPower = true
-			hum.JumpPower = CFG.Jump
-		end
-	end
-
-	if CFG.NoClip then applyNoClip(true) end
-	if CFG.Fly then flyStep() end
-
-	enforce()
+	pcall(function()
+		local c = getChar()
+		if CFG.NoClip then applyNoClip(true) end
+		enforce()
+	end)
 
 	acc.diag += dt
 	if acc.diag >= 0.5 then
 		acc.diag = 0
-		hookHumanoid()
-		local names = {}
-		if c then
-			for _, p in ipairs(collectLegParts(c)) do names[#names + 1] = p.Name end
-		end
-		diag.Text = #names > 0 and ("детали ноги: " .. table.concat(names, ", ")) or "детали ноги: НЕ найдены"
-		local h = getHum()
-		speedLive.Text = "в игре: WalkSpeed=" .. tostring(h and math.floor(h.WalkSpeed) or "—")
-			.. "  цель=" .. tostring(CFG.Speed)
+		pcall(function()
+			rebuildCache()
+			local names = {}
+			for _, p in ipairs(cache.leg) do names[#names + 1] = p.Name end
+			diag.Text = "нога: " .. (#names > 0 and table.concat(names, ", ") or "НЕ найдена")
+				.. "   |   голова: " .. (cache.head and "найдена" or "нет")
+				.. "   |   аксессуары на ноге: " .. tostring(#cache.legAcc)
+		end)
 	end
 
 	acc.fov += dt
@@ -1004,44 +919,32 @@ conn(RunService.RenderStepped, function(dt)
 	end
 end)
 
---== 15. Респавн ==--
+--== 13. Респавн ==--
 local function onCharacter(char)
-	legCache = { char = nil, parts = {}, handles = {} }
-	speedHum = nil
+	cache = { char = nil, hum = nil, leg = {}, legAcc = {}, head = nil, face = nil }
 	local hum = char:WaitForChild("Humanoid", 5)
 	if not hum then return end
 	task.wait(0.4)
-	hookHumanoid()
-	if CFG.KeepSpeed then hum.WalkSpeed = CFG.Speed end
-	if CFG.KeepJump then
-		hum.UseJumpPower = true
-		hum.JumpPower = CFG.Jump
-	end
 	reapplyAll()
 end
 
 conn(LP.CharacterAdded, onCharacter)
 if LP.Character then task.spawn(onCharacter, LP.Character) end
 
---== 16. Инициализация ==--
+--== 14. Инициализация ==--
 setFOV(CFG.FOV)
 if CFG.Fullbright then setFullbright(true) elseif CFG.Sky ~= "По умолчанию" then applySky(CFG.Sky) end
 task.spawn(function()
 	task.wait(1)
-	hookHumanoid()
 	reapplyAll()
 end)
-toast("SleepScript v1.4 загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
+toast("SleepScript v1.5 загружен  |  " .. CFG.MenuKey .. " — меню", COL.accent)
 
---== 17. Выгрузка ==--
+--== 15. Выгрузка ==--
 function API.Unload()
 	for _, c in ipairs(CONNS) do pcall(function() c:Disconnect() end) end
 	pcall(function() RunService:UnbindFromRenderStep("SleepScript_FOV") end)
 	if fovConn then pcall(function() fovConn:Disconnect() end) end
-	if speedConn then pcall(function() speedConn:Disconnect() end) end
-	if jumpConn then pcall(function() jumpConn:Disconnect() end) end
-	if flyBV then flyBV:Destroy() end
-	if flyBG then flyBG:Destroy() end
 	resetLighting()
 	local cam = workspace.CurrentCamera
 	if cam then cam.FieldOfView = 70 end
@@ -1054,8 +957,6 @@ function API.Unload()
 			end
 			if d:IsA("Decal") and d.Parent and d.Parent.Name == "Head" then d.Transparency = 0 end
 		end
-		local hum = getHum(c)
-		if hum then hum.PlatformStand = false end
 	end
 	pcall(function() gui:Destroy() end)
 	pcall(function() guiNotify:Destroy() end)
